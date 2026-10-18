@@ -16,18 +16,29 @@ function manifest() { return { name: 'FUF Browser Runtime MCP', version: '0.1.0'
 function rpc(id, result) { return { jsonrpc: '2.0', id, result }; }
 function rpcError(id, code, message) { return { jsonrpc: '2.0', id, error: { code, message } }; }
 function toolText(value) { return { content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] }; }
+
 export class RuntimeRelay {
-  constructor(state, env) { this.state = state; this.env = env; this.socket = null; }
+  constructor(state, env) { this.state = state; this.env = env; this.socket = null; this.pending = new Map(); }
   async fetch(request) {
     if (!constantTimeEqual((request.headers.get('authorization') || '').replace(/^Bearer\s+/i, ''), this.env.MCP_GATEWAY_SECRET || '')) return unauthorized();
     const url = new URL(request.url);
-    if (url.pathname !== '/relay/connect' || request.headers.get('Upgrade') !== 'websocket') return new Response('Not Found', { status: 404 });
-    const pair = new WebSocketPair(); const [client, server] = Object.values(pair); server.accept(); this.socket = server;
-    server.addEventListener('close', () => { if (this.socket === server) this.socket = null; });
-    return new Response(null, { status: 101, webSocket: client });
+    if (url.pathname === '/relay/connect' && request.headers.get('Upgrade') === 'websocket') {
+      const pair = new WebSocketPair(); const client = pair[0], server = pair[1]; server.accept(); this.socket = server;
+      server.addEventListener('message', event => { try { const msg = JSON.parse(event.data); const p = this.pending.get(msg.id); if (p) { this.pending.delete(msg.id); p(msg); } } catch {} });
+      server.addEventListener('close', () => { if (this.socket === server) this.socket = null; for (const p of this.pending.values()) p({ status: 502, body: JSON.stringify({ error: 'connector_disconnected' }) }); this.pending.clear(); });
+      return new Response(null, { status: 101, webSocket: client });
+    }
+    if (url.pathname === '/relay/action' && request.method === 'POST') {
+      if (!this.socket || this.socket.readyState !== 1) return Response.json({ status: 'relay_not_connected' }, { status: 503 });
+      const payload = await request.json(); const id = crypto.randomUUID();
+      const answer = new Promise(resolve => { this.pending.set(id, resolve); setTimeout(() => { if (this.pending.delete(id)) resolve({ status: 504, body: JSON.stringify({ error: 'connector_timeout' }) }); }, 25000); });
+      this.socket.send(JSON.stringify({ type: 'action', id, action: payload.action, arguments: payload.arguments || {} }));
+      const result = await answer; return new Response(result.body || JSON.stringify(result), { status: result.status || 200, headers: { 'content-type': 'application/json' } });
+    }
+    return new Response('Not Found', { status: 404 });
   }
-  send(message) { if (this.socket?.readyState === 1) this.socket.send(JSON.stringify(message)); }
 }
+
 export default { async fetch(request, env) {
   if (!authorized(request, env)) return unauthorized();
   const url = new URL(request.url);
@@ -44,6 +55,9 @@ export default { async fetch(request, env) {
   const name = message.params?.name, args = message.params?.arguments || {};
   if (!TOOL_DEFINITIONS.some(tool => tool.name === name)) return Response.json(rpcError(id, -32602, `Unknown tool: ${name}`));
   if (name === 'browser_runtime_manifest') return Response.json(rpc(id, toolText(manifest())));
-  const relayId = env.RUNTIME_RELAY_ID || 'runtime'; const stub = env.RUNTIME_RELAY.get(env.RUNTIME_RELAY.idFromName(relayId));
-  return Response.json(rpc(id, toolText({ ok: false, status: 'relay_connector_pending', action: name, message: 'The fixed MCP gateway is ready. The outbound runtime connector must be online before browser actions can run.', relay: '/relay/connect' })));
+  const relay = env.RUNTIME_RELAY;
+  if (!relay) return Response.json(rpc(id, toolText({ ok: false, status: 'relay_not_configured' })));
+  const stub = relay.get(relay.idFromName(env.RUNTIME_RELAY_ID || 'runtime'));
+  const response = await stub.fetch('https://relay.internal/relay/action', { method: 'POST', headers: { 'content-type': 'application/json', 'authorization': `Bearer ${env.MCP_GATEWAY_SECRET}` }, body: JSON.stringify({ action: name, arguments: args }) });
+  return Response.json(rpc(id, toolText({ status: response.status, body: await response.text() })));
 } };
