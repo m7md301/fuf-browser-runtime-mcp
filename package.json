@@ -1,13 +1,8 @@
 {
   "name": "fuf-browser-runtime-mcp",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
-  "scripts": {
-    "check": "node --check src/worker.js",
-    "test": "npm run check"
-  },
-  "devDependencies": {
-    "wrangler": "^4.0.0"
-  }
+  "scripts": {"check":"node --check src/worker.js","test":"npm run check"},
+  "devDependencies": {"wrangler":"^4.0.0"}
 }
