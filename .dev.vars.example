@@ -1,0 +1,2 @@
+# Set this only in Cloudflare Workers → Variables and Secrets → Secret.
+MCP_GATEWAY_SECRET=

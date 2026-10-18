@@ -1,0 +1,6 @@
+{
+  "name": "fuf-browser-runtime-mcp",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-10-18",
+  "workers_dev": true
+}
