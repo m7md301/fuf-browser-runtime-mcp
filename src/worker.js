@@ -16,6 +16,18 @@ function manifest() { return { name: 'FUF Browser Runtime MCP', version: '0.1.0'
 function rpc(id, result) { return { jsonrpc: '2.0', id, result }; }
 function rpcError(id, code, message) { return { jsonrpc: '2.0', id, error: { code, message } }; }
 function toolText(value) { return { content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] }; }
+export class RuntimeRelay {
+  constructor(state, env) { this.state = state; this.env = env; this.socket = null; }
+  async fetch(request) {
+    if (!constantTimeEqual((request.headers.get('authorization') || '').replace(/^Bearer\s+/i, ''), this.env.MCP_GATEWAY_SECRET || '')) return unauthorized();
+    const url = new URL(request.url);
+    if (url.pathname !== '/relay/connect' || request.headers.get('Upgrade') !== 'websocket') return new Response('Not Found', { status: 404 });
+    const pair = new WebSocketPair(); const [client, server] = Object.values(pair); server.accept(); this.socket = server;
+    server.addEventListener('close', () => { if (this.socket === server) this.socket = null; });
+    return new Response(null, { status: 101, webSocket: client });
+  }
+  send(message) { if (this.socket?.readyState === 1) this.socket.send(JSON.stringify(message)); }
+}
 export default { async fetch(request, env) {
   if (!authorized(request, env)) return unauthorized();
   const url = new URL(request.url);
@@ -32,11 +44,6 @@ export default { async fetch(request, env) {
   const name = message.params?.name, args = message.params?.arguments || {};
   if (!TOOL_DEFINITIONS.some(tool => tool.name === name)) return Response.json(rpcError(id, -32602, `Unknown tool: ${name}`));
   if (name === 'browser_runtime_manifest') return Response.json(rpc(id, toolText(manifest())));
-  const relay = env.RUNTIME_RELAY_URL;
-  if (!relay) return Response.json(rpc(id, toolText({ ok: false, status: 'relay_not_configured', action: name, message: 'The MCP gateway is deployed, but the private runtime relay is not configured yet.' })));
-  try {
-    const response = await fetch(`${relay.replace(/\/$/, '')}/mcp/action`, { method: 'POST', headers: { 'content-type': 'application/json', 'authorization': `Bearer ${env.MCP_GATEWAY_SECRET}` }, body: JSON.stringify({ action: name, arguments: args }) });
-    return Response.json(rpc(id, toolText({ status: response.status, body: await response.text() })));
-  } catch (error) { return Response.json(rpc(id, toolText({ ok: false, status: 'relay_error', error: error.message })));
-  }
+  const relayId = env.RUNTIME_RELAY_ID || 'runtime'; const stub = env.RUNTIME_RELAY.get(env.RUNTIME_RELAY.idFromName(relayId));
+  return Response.json(rpc(id, toolText({ ok: false, status: 'relay_connector_pending', action: name, message: 'The fixed MCP gateway is ready. The outbound runtime connector must be online before browser actions can run.', relay: '/relay/connect' })));
 } };
