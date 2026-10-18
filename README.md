@@ -1,36 +1,9 @@
 # FUF Browser Runtime MCP
 
-This is intentionally a separate private repository from the local Chromium runtime.
+The Worker exposes the MCP tools and a temporary mobile-friendly noVNC page. Runtime sessions are local; the Cloudflare Worker only relays the authenticated WebSocket.
 
-## Secret
+## Session lifecycle
 
-Create a Cloudflare Worker Secret named:
+Human sessions default to 15 minutes. The local Runtime owns the TTL and deletes the session URL, token, VNC password and passfile during cleanup. The Bridge rejects VNC opens when the token is missing, expired, or no longer matches the active session.
 
-```text
-MCP_GATEWAY_SECRET
-```
-
-Generate a value locally:
-
-```bash
-openssl rand -hex 32
-```
-
-Store it only in Cloudflare Workers → Settings → Variables and Secrets → Secret. The Worker requires `Authorization: Bearer <value>` before exposing the MCP endpoint or tool list.
-
-## Deploy
-
-```bash
-npm install
-npx wrangler login
-npx wrangler secret put MCP_GATEWAY_SECRET
-npm run deploy
-```
-
-The stable endpoint is:
-
-```text
-https://<worker>.<account>.workers.dev/mcp
-```
-
-`RUNTIME_RELAY_URL` is intentionally not configured until the private relay is built and tested. The Worker does not start the browser just because someone visits the URL.
+The Worker UI supports mobile viewport scaling, touch input, a virtual text-input helper, and direct noVNC key events. Publish the Worker after each `src/worker.js` change, then create a fresh HIL session for testing.
