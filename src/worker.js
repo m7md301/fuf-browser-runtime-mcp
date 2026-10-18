@@ -1,67 +1,20 @@
 'use strict';
-
 const encoder = new TextEncoder();
-const TOOL_DEFINITIONS = [
-  { name: 'browser_runtime_enable', description: 'Enable browser runtime explicitly.', inputSchema: { type: 'object', properties: {} } },
-  { name: 'browser_runtime_status', description: 'Return complete runtime status.', inputSchema: { type: 'object', properties: {} } },
-  { name: 'browser_runtime_disable', description: 'Disable runtime and close temporary sessions.', inputSchema: { type: 'object', properties: {} } },
-  { name: 'browser_request_human', description: 'Create a temporary human intervention session.', inputSchema: { type: 'object', properties: { reason: { type: 'string' }, ttlSeconds: { type: 'number' } }, required: ['reason'] } },
-  { name: 'browser_human_done', description: 'Mark current human intervention complete.', inputSchema: { type: 'object', properties: {} } },
-  { name: 'browser_runtime_manifest', description: 'Return a portable runtime description.', inputSchema: { type: 'object', properties: { format: { type: 'string', enum: ['text', 'json'] } } } }
+const TOOLS = [
+  { name:'browser_runtime_enable', description:'Enable browser runtime explicitly and wait until ready.', inputSchema:{type:'object',properties:{}} },
+  { name:'browser_runtime_status', description:'Return complete runtime and relay status.', inputSchema:{type:'object',properties:{}} },
+  { name:'browser_runtime_disable', description:'Disable runtime and close temporary sessions.', inputSchema:{type:'object',properties:{}} },
+  { name:'browser_request_human', description:'Create a temporary human intervention session.', inputSchema:{type:'object',properties:{reason:{type:'string'},ttlSeconds:{type:'number'}},required:['reason']} },
+  { name:'browser_human_done', description:'Mark current human intervention complete.', inputSchema:{type:'object',properties:{}} },
+  { name:'browser_runtime_manifest', description:'Return a portable runtime description.', inputSchema:{type:'object',properties:{format:{type:'string',enum:['text','json']}}} }
 ];
-function unauthorized() { return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401, headers: { 'content-type': 'application/json', 'www-authenticate': 'Bearer' } }); }
-function constantTimeEqual(a, b) { const aa = encoder.encode(a || ''), bb = encoder.encode(b || ''); let diff = aa.length ^ bb.length; const n = Math.max(aa.length, bb.length); for (let i = 0; i < n; i++) diff |= (aa[i % (aa.length || 1)] || 0) ^ (bb[i % (bb.length || 1)] || 0); return diff === 0; }
-function authorized(request, env) { const token = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, ''); return Boolean(env.MCP_GATEWAY_SECRET) && constantTimeEqual(token, env.MCP_GATEWAY_SECRET); }
-function manifest() { return { name: 'FUF Browser Runtime MCP', version: '0.1.0', endpoint: '/mcp', authentication: 'Bearer MCP_GATEWAY_SECRET', activation: 'explicit only', tools: TOOL_DEFINITIONS.map(t => t.name), security: ['MCP access is denied without the configured secret', 'HIL credentials are per-session and temporary', 'CDP and VNC are not exposed directly'] }; }
-function rpc(id, result) { return { jsonrpc: '2.0', id, result }; }
-function rpcError(id, code, message) { return { jsonrpc: '2.0', id, error: { code, message } }; }
-function toolText(value) { return { content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] }; }
-
+function eq(a,b){const x=encoder.encode(a||''),y=encoder.encode(b||'');let d=x.length^y.length;for(let i=0;i<Math.max(x.length,y.length);i++)d|=(x[i%(x.length||1)]||0)^(y[i%(y.length||1)]||0);return d===0}
+function auth(req,env){return Boolean(env.MCP_GATEWAY_SECRET)&&eq((req.headers.get('authorization')||'').replace(/^Bearer\s+/i,''),env.MCP_GATEWAY_SECRET)}
+function unauth(){return new Response(JSON.stringify({error:'unauthorized'}),{status:401,headers:{'content-type':'application/json','www-authenticate':'Bearer'}})}
+function rpc(id,result){return {jsonrpc:'2.0',id,result}}function err(id,code,message){return {jsonrpc:'2.0',id,error:{code,message}}}function text(v){return {content:[{type:'text',text:typeof v==='string'?v:JSON.stringify(v,null,2)}]}}
+function manifest(){return {name:'FUF Browser Runtime MCP',version:'0.2.0',endpoint:'/mcp',authentication:'Bearer MCP_GATEWAY_SECRET',activation:'explicit only',scope:'Runtime and Human-in-the-Loop management; normal browser actions remain local CDP tools',tools:TOOLS.map(x=>x.name),security:['Unauthorized clients receive 401 and no tools','HIL credentials are temporary and session-scoped','CDP and VNC remain local/private']}}
 export class RuntimeRelay {
-  constructor(state, env) { this.state = state; this.env = env; this.socket = null; this.pending = new Map(); }
-  async fetch(request) {
-    if (!authorized(request, this.env)) return unauthorized();
-    const url = new URL(request.url);
-    if (url.pathname === '/relay/connect' && request.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
-      const pair = new WebSocketPair(); const client = pair[0], server = pair[1]; server.accept(); this.socket = server;
-      server.addEventListener('message', event => { try { const msg = JSON.parse(event.data); const p = this.pending.get(msg.id); if (p) { this.pending.delete(msg.id); p(msg); } } catch {} });
-      server.addEventListener('close', () => { if (this.socket === server) this.socket = null; for (const p of this.pending.values()) p({ status: 502, body: JSON.stringify({ error: 'connector_disconnected' }) }); this.pending.clear(); });
-      return new Response(null, { status: 101, webSocket: client });
-    }
-    if (url.pathname === '/relay/action' && request.method === 'POST') {
-      if (!this.socket || this.socket.readyState !== 1) return Response.json({ status: 'relay_not_connected' }, { status: 503 });
-      const payload = await request.json(); const id = crypto.randomUUID();
-      const answer = new Promise(resolve => { this.pending.set(id, resolve); setTimeout(() => { if (this.pending.delete(id)) resolve({ status: 504, body: JSON.stringify({ error: 'connector_timeout' }) }); }, 25000); });
-      this.socket.send(JSON.stringify({ type: 'action', id, action: payload.action, arguments: payload.arguments || {} }));
-      const result = await answer; return new Response(result.body || JSON.stringify(result), { status: result.status || 200, headers: { 'content-type': 'application/json' } });
-    }
-    return new Response('Not Found', { status: 404 });
-  }
+ constructor(state,env){this.state=state;this.env=env;this.socket=null;this.pending=new Map()}
+ async fetch(req){if(!auth(req,this.env))return unauth();const u=new URL(req.url);if(u.pathname==='/relay/connect'&&req.headers.get('Upgrade')?.toLowerCase()==='websocket'){const pair=new WebSocketPair(),client=pair[0],server=pair[1];server.accept();if(this.socket&&this.socket.readyState===1)this.socket.close(4001,'replaced');this.socket=server;server.addEventListener('message',e=>{try{const m=JSON.parse(e.data),p=this.pending.get(m.id);if(p){this.pending.delete(m.id);p(m)}}catch{}});server.addEventListener('close',()=>{if(this.socket===server)this.socket=null;for(const p of this.pending.values())p({status:502,body:JSON.stringify({error:'connector_disconnected'})});this.pending.clear()});return new Response(null,{status:101,webSocket:client})}if(u.pathname==='/relay/action'&&req.method==='POST'){if(!this.socket||this.socket.readyState!==1)return Response.json({status:'relay_not_connected'},{status:503});const p=await req.json(),id=crypto.randomUUID(),answer=new Promise(resolve=>{this.pending.set(id,resolve);setTimeout(()=>{if(this.pending.delete(id))resolve({status:504,body:JSON.stringify({error:'connector_timeout'})})},60000)});this.socket.send(JSON.stringify({type:'action',id,action:p.action,arguments:p.arguments||{}}));const r=await answer;return new Response(r.body||JSON.stringify(r),{status:r.status||200,headers:{'content-type':'application/json'}})}return new Response('Not Found',{status:404})}
 }
-
-export default { async fetch(request, env) {
-  if (!authorized(request, env)) return unauthorized();
-  const url = new URL(request.url);
-  const relay = env.RUNTIME_RELAY;
-  if (relay && (url.pathname === '/relay/connect' || url.pathname === '/relay/action')) {
-    const stub = relay.get(relay.idFromName(env.RUNTIME_RELAY_ID || 'runtime'));
-    return stub.fetch(request);
-  }
-  if (request.method === 'GET' && url.pathname === '/health') return Response.json({ ok: true, service: 'fuf-browser-runtime-mcp' });
-  if (url.pathname !== '/mcp') return new Response('Not Found', { status: 404 });
-  if (request.method === 'GET') return Response.json(manifest());
-  let message; try { message = await request.json(); } catch { return Response.json(rpcError(null, -32700, 'Invalid JSON'), { status: 400 }); }
-  const id = message.id ?? null;
-  if (message.method === 'initialize') return Response.json(rpc(id, { protocolVersion: '2025-06-18', capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'fuf-browser-runtime-mcp', version: '0.1.0' } }));
-  if (message.method === 'notifications/initialized' || message.method === 'notifications/cancelled') return new Response(null, { status: 202 });
-  if (message.method === 'ping') return Response.json(rpc(id, {}));
-  if (message.method === 'tools/list') return Response.json(rpc(id, { tools: TOOL_DEFINITIONS }));
-  if (message.method !== 'tools/call') return Response.json(rpcError(id, -32601, 'Method not found'));
-  const name = message.params?.name, args = message.params?.arguments || {};
-  if (!TOOL_DEFINITIONS.some(tool => tool.name === name)) return Response.json(rpcError(id, -32602, `Unknown tool: ${name}`));
-  if (name === 'browser_runtime_manifest') return Response.json(rpc(id, toolText(manifest())));
-  if (!relay) return Response.json(rpc(id, toolText({ ok: false, status: 'relay_not_configured' })));
-  const stub = relay.get(relay.idFromName(env.RUNTIME_RELAY_ID || 'runtime'));
-  const response = await stub.fetch('https://relay.internal/relay/action', { method: 'POST', headers: { 'content-type': 'application/json', 'authorization': `Bearer ${env.MCP_GATEWAY_SECRET}` }, body: JSON.stringify({ action: name, arguments: args }) });
-  return Response.json(rpc(id, toolText({ status: response.status, body: await response.text() })));
-} };
+export default {async fetch(req,env){if(!auth(req,env))return unauth();const u=new URL(req.url),relay=env.RUNTIME_RELAY;if(relay&&(u.pathname==='/relay/connect'||u.pathname==='/relay/action'))return relay.get(relay.idFromName(env.RUNTIME_RELAY_ID||'runtime')).fetch(req);if(req.method==='GET'&&u.pathname==='/health')return Response.json({ok:true,service:'fuf-browser-runtime-mcp'});if(u.pathname!=='/mcp')return new Response('Not Found',{status:404});if(req.method==='GET')return Response.json(manifest());let m;try{m=await req.json()}catch{return Response.json(err(null,-32700,'Invalid JSON'),{status:400})}const id=m.id??null;if(m.method==='initialize')return Response.json(rpc(id,{protocolVersion:'2025-06-18',capabilities:{tools:{listChanged:false}},serverInfo:{name:'fuf-browser-runtime-mcp',version:'0.2.0'}}));if(m.method==='notifications/initialized'||m.method==='notifications/cancelled')return new Response(null,{status:202});if(m.method==='ping')return Response.json(rpc(id,{}));if(m.method==='tools/list')return Response.json(rpc(id,{tools:TOOLS}));if(m.method!=='tools/call')return Response.json(err(id,-32601,'Method not found'));const name=m.params?.name,args=m.params?.arguments||{};if(!TOOLS.some(x=>x.name===name))return Response.json(err(id,-32602,`Unknown tool: ${name}`));if(name==='browser_runtime_manifest')return Response.json(rpc(id,text(manifest())));if(!relay)return Response.json(rpc(id,text({ok:false,status:'relay_not_configured'})));const r=await relay.get(relay.idFromName(env.RUNTIME_RELAY_ID||'runtime')).fetch('https://relay.internal/relay/action',{method:'POST',headers:{'content-type':'application/json','authorization':`Bearer ${env.MCP_GATEWAY_SECRET}`},body:JSON.stringify({action:name,arguments:args})});return Response.json(rpc(id,text({status:r.status,body:await r.text()})))}}
