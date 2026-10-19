@@ -11,174 +11,61 @@ function htmlPage(sessionId, token) {
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>FUF Browser Runtime</title>
 <style>
-html,body,#s{margin:0;width:100%;height:100%;background:#111;color:#eee;overflow:hidden}
-#m{position:fixed;z-index:5;top:8px;left:8px;padding:8px;background:#222d;border-radius:7px;font:13px sans-serif;max-width:60%}
-#bar{position:fixed;z-index:6;bottom:0;left:0;right:0;display:none;flex-direction:column;gap:4px;background:#1a1d23;padding:6px 8px 10px;border-top:1px solid #333}
-.row{display:flex;gap:6px;align-items:center}
-button,input,textarea{font:16px sans-serif;color:#fff;background:#30343b;border:1px solid #555;border-radius:7px;padding:8px;outline:none}
-button{min-width:44px;cursor:pointer;active:opacity:.7}
-button:active{background:#444}
-textarea{flex:1;resize:none;direction:auto;min-height:40px;max-height:80px;font-size:16px}
-#login{position:fixed;z-index:10;top:50%;left:50%;transform:translate(-50%,-50%);background:#20242b;border:1px solid #555;border-radius:12px;padding:20px;width:280px;text-align:center}
-#pass{width:100%;box-sizing:border-box;margin-bottom:10px;font-size:18px;text-align:center}
-#go{width:100%;background:#356bd8;font-size:16px;padding:10px}
-.expired{display:grid!important;place-items:center;text-align:center;font:18px sans-serif;padding:20px}
-.kbtn{font-size:20px;padding:10px 14px;min-width:48px}
+html,body,#s{margin:0;width:100%;height:100%;background:#111;color:#eee}
+#m{position:fixed;z-index:5;top:8px;left:8px;padding:8px;background:#222d;border-radius:7px;font:13px sans-serif}
+#bar{position:fixed;z-index:6;bottom:12px;left:8px;right:8px;display:flex;gap:6px;background:#222d;padding:7px;border-radius:10px}
+button,input,textarea{font:16px sans-serif;color:#fff;background:#30343b;border:1px solid #777;border-radius:7px;padding:8px}
+button{min-width:44px}
+textarea{flex:1;resize:none;direction:auto}
+#login{position:fixed;z-index:10;top:55px;left:10px;right:10px;background:#20242b;border:1px solid #777;border-radius:10px;padding:12px}
+#pass{width:100%;box-sizing:border-box;margin-bottom:8px}
+#go{width:100%;background:#356bd8}
+.expired{display:grid!important;place-items:center;text-align:center;font:16px sans-serif}
 </style>
 </head>
 <body>
-<div id="m">في انتظار الاتصال…</div>
+<div id="m">FUF Browser Runtime</div>
 <div id="s"></div>
 <div id="login">
-  <div style="margin-bottom:12px;font-size:15px">أدخل كلمة مرور جلسة VNC</div>
+  <div style="margin-bottom:8px;font-weight:bold">أدخل كلمة مرور جلسة VNC</div>
   <input id="pass" type="password" placeholder="كلمة المرور" autocomplete="off">
   <button id="go">اتصال</button>
 </div>
-<div id="bar">
-  <div class="row">
-    <textarea id="k" placeholder="اكتب هنا ثم اضغط إرسال…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="text"></textarea>
-    <button id="send" style="background:#356bd8;min-width:60px">إرسال</button>
-  </div>
-  <div class="row">
-    <button class="kbtn" id="back">⌫</button>
-    <button class="kbtn" id="enter">↵</button>
-    <button class="kbtn" id="tab">⇥</button>
-    <button class="kbtn" id="esc">Esc</button>
-    <button id="fit" style="flex:1">⛶ ملء الشاشة</button>
-  </div>
+<div id="bar" style="display:none">
+  <button id="fit" title="ملء الشاشة">⛶</button>
+  <button id="back" title="مسح">⌫</button>
+  <button id="enter" title="إدخال">↵</button>
+  <textarea id="k" rows="1" placeholder="اكتب هنا..." inputmode="text" autocomplete="off"></textarea>
 </div>
 <script type="module">
-const $=x=>document.getElementById(x),m=$('m'),s=$('s'),k=$('k'),login=$('login'),pass=$('pass'),bar=$('bar'),go=$('go');
+const $=x=>document.getElementById(x),m=$('m'),s=$('s'),k=$('k'),login=$('login'),pass=$('pass'),bar=$('bar'),go=$('go'),enter=$('enter'),back=$('back'),fit=$('fit');
 let dead=0,r=null;
 const z={Backspace:0xff08,Enter:0xff0d,Tab:0xff09,Escape:0xff1b,Delete:0xffff,ArrowLeft:0xff51,ArrowUp:0xff52,ArrowRight:0xff53,ArrowDown:0xff54};
-
-function sendKeySym(sym,down=true){
-  if(!r||dead)return;
-  try{r.sendKey(sym,null,down)}catch(e){}
-}
-
-function sendChar(ch){
-  if(!r||dead)return;
-  const code=ch.charCodeAt(0);
-  if(code<128){
-    // ASCII: send as keysym directly
-    const sym=ch.toLowerCase().charCodeAt(0);
-    sendKeySym(sym,true);
-    setTimeout(()=>sendKeySym(sym,false),50);
-  } else {
-    // Non-ASCII (Arabic etc): use clipboard paste
-    try{
-      r.clipboardPasteFrom(ch);
-    }catch(e){
-      m.textContent='تعذر إرسال: '+e.message;
-    }
-  }
-}
-
-function sendText(text){
-  if(!text||!r||dead)return;
-  // Send character by character with small delays for reliability
-  let i=0;
-  function next(){
-    if(i>=text.length||dead)return;
-    sendChar(text[i]);
-    i++;
-    if(i<text.length)setTimeout(next,30);
-  }
-  next();
-  m.textContent='تم إرسال '+text.length+' حرف';
-  setTimeout(()=>{if(!dead)m.textContent='Connected'},1500);
-}
-
+function key(x,d=true){if(!r||dead)return;const n=z[x]??(x.length===1?x.toLowerCase().charCodeAt(0):0);if(n)r.sendKey(n,null,d)}
+function paste(v){if(!v||!r||dead)return;for(const c of v){const code=c.charCodeAt(0);r.sendKey(code,null,true);r.sendKey(code,null,false)}m.textContent='تم إرسال '+v.length+' حرف'}
 async function connect(){
   if(!pass.value){m.textContent='أدخل كلمة المرور';return}
-  m.textContent='جاري الاتصال…';
-  go.disabled=true;
+  m.textContent='جاري تحميل اتصال VNC…';go.disabled=true;
   try{
-    const mod=await import('https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/lib/rfb.js/+esm');
-    const RFB=mod.default?.default||mod.default||mod.RFB;
+    const mod=await import('https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/lib/rfb.js/+esm'),RFB=mod.default?.default||mod.default||mod.RFB;
     if(typeof RFB!=='function')throw Error('RFB unavailable');
-    login.style.display='none';
-    m.textContent='Connecting…';
-    const wsUrl='wss://${new URL(`https://fuf-browser-runtime-mcp.gacfzv.workers.dev`).host}/human/${sessionId}/vnc?token=${token}';
-    r=new RFB(s,wsUrl,{credentials:{password:pass.value}});
-    r.scaleViewport=true;
-    r.resizeSession=true;
-    r.focusOnClick=true;
-    r.addEventListener('connect',()=>{
-      m.textContent='Connected';
-      bar.style.display='flex';
-      k.focus();
-    });
-    r.addEventListener('disconnect',()=>{
-      if(!dead){
-        m.textContent='انقطع الاتصال';
-        login.style.display='block';
-        go.disabled=false;
-        bar.style.display='none';
-      }
-    });
-    r.addEventListener('credentialsrequired',()=>{
-      login.style.display='block';
-      m.textContent='كلمة المرور مطلوبة';
-      go.disabled=false;
-    });
-    r.addEventListener('securityfailure',()=>{
-      login.style.display='block';
-      m.textContent='كلمة المرور غير صحيحة';
-      go.disabled=false;
-    });
-  }catch(e){
-    m.textContent='فشل: '+e.message;
-    go.disabled=false;
-    login.style.display='block';
-  }
+    login.style.display='none';m.textContent='Connecting…';
+    r=new RFB(s,"wss://fuf-browser-runtime-mcp.gacfzv.workers.dev/human/${sessionId}/vnc?token=${token}",{credentials:{password:pass.value}});
+    r.scaleViewport=true;r.resizeSession=true;r.focusOnClick=true;
+    r.addEventListener('connect',()=>{m.textContent='Connected';bar.style.display='flex'});
+    r.addEventListener('disconnect',()=>{if(!dead){m.textContent='انقطع الاتصال';login.style.display='block';go.disabled=false}});
+    r.addEventListener('credentialsrequired',()=>{login.style.display='block';m.textContent='كلمة المرور مطلوبة';go.disabled=false});
+    r.addEventListener('securityfailure',()=>{login.style.display='block';m.textContent='كلمة المرور غير صحيحة';go.disabled=false})
+  }catch(e){m.textContent='فشل تحميل noVNC: '+e.message;go.disabled=false;login.style.display='block'}
 }
-
 go.addEventListener('click',connect);
 pass.addEventListener('keydown',e=>{if(e.key==='Enter')connect()});
-
-// Send button: sends all text in textarea
-$('send').addEventListener('click',()=>{
-  const v=k.value.trim();
-  if(v){sendText(v);k.value=''}
-});
-
-// Also send on Enter in textarea (Shift+Enter for newline)
-k.addEventListener('keydown',e=>{
-  if(e.key==='Enter'&&!e.shiftKey){
-    e.preventDefault();
-    const v=k.value.trim();
-    if(v){sendText(v);k.value=''}
-    // Also send Enter key after text
-    setTimeout(()=>sendKeySym(0xff0d,true),100);
-    setTimeout(()=>sendKeySym(0xff0d,false),150);
-  }
-  // Special keys
-  if(z[e.key]){
-    e.preventDefault();
-    sendKeySym(z[e.key],true);
-    setTimeout(()=>sendKeySym(z[e.key],false),50);
-  }
-});
-
-$('enter').addEventListener('click',()=>{sendKeySym(0xff0d,true);setTimeout(()=>sendKeySym(0xff0d,false),50)});
-$('back').addEventListener('click',()=>{sendKeySym(0xff08,true);setTimeout(()=>sendKeySym(0xff08,false),50)});
-$('tab').addEventListener('click',()=>{sendKeySym(0xff09,true);setTimeout(()=>sendKeySym(0xff09,false),50)});
-$('esc').addEventListener('click',()=>{sendKeySym(0xff1b,true);setTimeout(()=>sendKeySym(0xff1b,false),50)});
-$('fit').addEventListener('click',()=>{if(r){r.scaleViewport=true;r.resizeSession=true;r.focus()}});
-
-// Auto-focus textarea when tapping on canvas area
-s.addEventListener('click',()=>{if(r&&!dead)k.focus()});
-
-// TTL expiry
-setTimeout(()=>{
-  dead=1;
-  if(r)r.disconnect();
-  s.className='expired';
-  s.innerHTML='<div>انتهت جلسة التدخل<br><small>Human intervention session expired.</small></div>';
-  bar.remove();login.remove();m.remove();
-},900000);
+k.addEventListener('input',()=>{const v=k.value;k.value='';paste(v)});
+enter.addEventListener('click',()=>key('Enter'));
+back.addEventListener('click',()=>key('Backspace'));
+fit.addEventListener('click',()=>{if(r){r.scaleViewport=true;r.resizeSession=true;r.focus()}});
+k.addEventListener('keydown',e=>{if(z[e.key]){e.preventDefault();key(e.key)}});
+setTimeout(()=>{dead=1;if(r)r.disconnect();s.className='expired';s.innerHTML='انتهت جلسة التدخل<br>Human intervention session expired.';bar.remove();login.remove();m.remove()},900000);
 </script>
 </body>
 </html>`;
@@ -190,11 +77,11 @@ export default {
     const path = url.pathname;
 
     // MCP endpoint
-    if (path === '/mcp') {
+    if (path === '/mcp' || path === '/mcp/') {
       return handleMCP(request, env);
     }
 
-    // Human HIL page
+    // Human session page
     const humanMatch = path.match(/^\\/human\\/([^\\/]+)$/);
     if (humanMatch && request.method === 'GET') {
       const sessionId = humanMatch[1];
@@ -210,49 +97,71 @@ export default {
     if (vncMatch && request.headers.get('Upgrade') === 'websocket') {
       const sessionId = vncMatch[1];
       const token = url.searchParams.get('token');
-      if (!token) return new Response('Missing token', { status: 401 });
+      if (!token) return new Response('Missing token', { status: 400 });
 
-      const relayId = env.RUNTIME_RELAY_ID || RELAY_ID;
-      const relay = env.RUNTIME_RELAY.get(env.RUNTIME_RELAY.idFromName(relayId));
+      const relay = env.RUNTIME_RELAY;
+      if (!relay) return new Response('Relay not configured', { status: 500 });
 
-      // Create a pair: client <-> worker <-> relay
-      const { 0: clientWs, 1: workerWs } = new WebSocketPair();
-      workerWs.accept();
+      const id = env.RUNTIME_RELAY_ID || RELAY_ID;
+      const stub = relay.get(id);
 
-      // Connect to relay
-      const relayUrl = new URL(request.url);
-      relayUrl.pathname = '/relay/connect';
-      relayUrl.searchParams.set('session', sessionId);
-      relayUrl.searchParams.set('token', token);
-      relayUrl.searchParams.set('type', 'vnc');
+      const pair = new WebSocketPair();
+      const [client, server] = pair;
 
-      const relayResp = await relay.fetch(relayUrl.toString(), {
-        headers: { Upgrade: 'websocket' },
-      });
+      // Accept the client WebSocket
+      server.accept();
 
-      if (relayResp.status !== 101) {
-        workerWs.close(1006, 'Relay connection failed');
-        return new Response('Relay failed', { status: 502 });
+      // Connect to the relay Durable Object
+      const relayUrl = `${url.origin}/relay/connect?session=${sessionId}&token=${token}`;
+      
+      // Use the Durable Object's WebSocket hibernation API
+      try {
+        const relayResponse = await stub.fetch(new Request(relayUrl, {
+          headers: { 'Upgrade': 'websocket' }
+        }));
+        
+        if (relayResponse.status !== 101) {
+          server.close(1008, 'Relay connection failed');
+          return new Response(null, { status: 101, webSocket: client });
+        }
+
+        const relayWs = relayResponse.webSocket;
+        relayWs.accept();
+
+        // Bidirectional relay
+        server.addEventListener('message', (e) => {
+          try { relayWs.send(e.data); } catch (_) {}
+        });
+        server.addEventListener('close', () => {
+          try { relayWs.close(); } catch (_) {}
+        });
+        relayWs.addEventListener('message', (e) => {
+          try { server.send(e.data); } catch (_) {}
+        });
+        relayWs.addEventListener('close', () => {
+          try { server.close(); } catch (_) {}
+        });
+      } catch (e) {
+        server.close(1011, 'Relay error: ' + e.message);
       }
 
-      const relayWs = relayResp.webSocket;
-      relayWs.accept();
+      return new Response(null, { status: 101, webSocket: client });
+    }
 
-      // Bridge: client <-> relay
-      workerWs.addEventListener('message', (e) => {
-        try { relayWs.send(e.data); } catch (_) {}
-      });
-      workerWs.addEventListener('close', () => {
-        try { relayWs.close(); } catch (_) {}
-      });
-      relayWs.addEventListener('message', (e) => {
-        try { workerWs.send(e.data); } catch (_) {}
-      });
-      relayWs.addEventListener('close', () => {
-        try { workerWs.close(); } catch (_) {}
-      });
+    // Relay connect endpoint (for Bridge)
+    if (path === '/relay/connect') {
+      const relay = env.RUNTIME_RELAY;
+      if (!relay) return new Response('Relay not configured', { status: 500 });
+      const id = env.RUNTIME_RELAY_ID || RELAY_ID;
+      const stub = relay.get(id);
+      return stub.fetch(request);
+    }
 
-      return new Response(null, { status: 101, webSocket: clientWs });
+    // Health check
+    if (path === '/health') {
+      return new Response(JSON.stringify({ status: 'ok' }), {
+        headers: { 'content-type': 'application/json' }
+      });
     }
 
     return new Response('Not found', { status: 404 });
