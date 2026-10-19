@@ -1,11 +1,269 @@
-'use strict';
-const E=new TextEncoder();
-const N=['browser_runtime_enable','browser_runtime_status','browser_runtime_disable','browser_request_human','browser_human_done','browser_runtime_manifest'];
-const TOOLS=N.map(name=>({name,description:name,inputSchema:{type:'object',properties:name==='browser_request_human'?{reason:{type:'string'},ttlSeconds:{type:'number'}}:{},required:name==='browser_request_human'?['reason']:[]}}));
-const auth=(r,e)=>(r.headers.get('authorization')||'').replace(/^Bearer\s+/i,'')===e.MCP_GATEWAY_SECRET;
-const rpc=(id,result)=>({jsonrpc:'2.0',id,result}),txt=x=>({content:[{type:'text',text:typeof x==='string'?x:JSON.stringify(x,null,2)}]}),manifest=()=>({name:'FUF Browser Runtime MCP',version:'0.7.2',endpoint:'/mcp',tools:N});
-function page(id,t){const w=`wss://fuf-browser-runtime-mcp.gacfzv.workers.dev/human/${encodeURIComponent(id)}/vnc?token=${encodeURIComponent(t)}`;return `<!doctype html><meta name=viewport content="width=device-width,initial-scale=1"><title>FUF Browser Runtime</title><style>html,body,#s{margin:0;width:100%;height:100%;background:#111;color:#eee}#m{position:fixed;z-index:5;top:8px;left:8px;padding:8px;background:#222d;border-radius:7px;font:13px sans-serif}#bar{position:fixed;z-index:6;bottom:12px;left:8px;right:8px;display:flex;gap:6px;background:#222d;padding:7px;border-radius:10px}button,input,textarea{font:16px sans-serif;color:#fff;background:#30343b;border:1px solid #777;border-radius:7px;padding:8px}button{min-width:44px}textarea{flex:1;resize:none;direction:auto}#login{position:fixed;z-index:10;top:55px;left:10px;right:10px;background:#20242b;border:1px solid #777;border-radius:10px;padding:12px}#pass{width:100%;box-sizing:border-box;margin-bottom:8px}#go{width:100%;background:#356bd8}.expired{display:grid!important;place-items:center;text-align:center;font:16px sans-serif}</style><div id=m>أدخل كلمة مرور جلسة VNC</div><div id=login><input id=pass type=password autocomplete=off placeholder="كلمة المرور"><button id=go type=button>اتصال</button></div><div id=s></div><div id=bar style="display:none"><button id=fit type=button>⛶</button><button id=back type=button>⌫</button><textarea id=k rows=1 dir="auto" placeholder="اكتب هنا…"></textarea><button id=enter type=button>↵</button></div><script type=module>const $=x=>document.getElementById(x),m=$('m'),s=$('s'),k=$('k'),login=$('login'),pass=$('pass'),bar=$('bar'),go=$('go'),enter=$('enter'),back=$('back'),fit=$('fit');let dead=0,r=null;const z={Backspace:0xff08,Enter:0xff0d,Tab:0xff09,Escape:0xff1b,Delete:0xffff,ArrowLeft:0xff51,ArrowUp:0xff52,ArrowRight:0xff53,ArrowDown:0xff54};function key(x,d=true){if(!r||dead)return;const n=z[x]??(x.length===1?x.toLowerCase().charCodeAt(0):0);if(n)r.sendKey(n,null,d)}function paste(v){if(!v||!r||dead)return;try{r.clipboardPasteFrom(v);m.textContent='النص أُرسل'}catch(e){m.textContent='تعذر إرسال النص'}}async function connect(){if(!pass.value){m.textContent='أدخل كلمة المرور';return}m.textContent='جاري تحميل اتصال VNC…';go.disabled=true;try{const mod=await import('https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/lib/rfb.js/+esm'),RFB=mod.default?.default||mod.default||mod.RFB;if(typeof RFB!=='function')throw Error('RFB unavailable');login.style.display='none';m.textContent='Connecting…';r=new RFB(s,${JSON.stringify(w)},{credentials:{password:pass.value}});r.scaleViewport=true;r.resizeSession=true;r.focusOnClick=true;r.addEventListener('connect',()=>{m.textContent='Connected';bar.style.display='flex'});r.addEventListener('disconnect',()=>{if(!dead){m.textContent='انقطع الاتصال';login.style.display='block';go.disabled=false}});r.addEventListener('credentialsrequired',()=>{login.style.display='block';m.textContent='كلمة المرور مطلوبة';go.disabled=false});r.addEventListener('securityfailure',()=>{login.style.display='block';m.textContent='كلمة المرور غير صحيحة';go.disabled=false})}catch(e){m.textContent='فشل تحميل noVNC: '+e.message;go.disabled=false;login.style.display='block'}}go.addEventListener('click',connect);pass.addEventListener('keydown',e=>{if(e.key==='Enter')connect()});k.addEventListener('input',()=>{const v=k.value;k.value='';paste(v)});enter.addEventListener('click',()=>key('Enter'));back.addEventListener('click',()=>key('Backspace'));fit.addEventListener('click',()=>{if(r){r.scaleViewport=true;r.resizeSession=true;r.focus()}});k.addEventListener('keydown',e=>{if(z[e.key]){e.preventDefault();key(e.key)}});setTimeout(()=>{dead=1;if(r)r.disconnect();s.className='expired';s.innerHTML='<div><h2>انتهت جلسة التدخل</h2><p>Human intervention session expired.</p></div>';bar.remove();login.remove();m.remove()},900000);</script>`}
-async function bytes(x){if(typeof x==='string')return E.encode(x);if(x instanceof ArrayBuffer)return new Uint8Array(x);if(ArrayBuffer.isView(x))return new Uint8Array(x.buffer,x.byteOffset,x.byteLength);return x?.arrayBuffer?new Uint8Array(await x.arrayBuffer()):new Uint8Array()}
-async function pack(id,x){const b=await bytes(x),i=E.encode(id),o=new Uint8Array(4+i.length+b.length);new DataView(o.buffer).setUint32(0,i.length);o.set(i,4);o.set(b,4+i.length);return o}function unpack(x){const b=new Uint8Array(x),n=new DataView(b.buffer,b.byteOffset,4).getUint32(0);return{id:new TextDecoder().decode(b.slice(4,4+n)),data:b.slice(4+n)}}
-export class RuntimeRelay{constructor(){this.socket=null;this.pending=new Map;this.clients=new Map}async fetch(r){const u=new URL(r.url);if(u.pathname==='/relay/connect'&&r.headers.get('Upgrade')?.toLowerCase()==='websocket'){const p=new WebSocketPair(),c=p[0],s=p[1];s.accept();this.socket?.close();this.socket=s;s.addEventListener('message',async q=>{if(typeof q.data==='string'){try{const x=JSON.parse(q.data),f=this.pending.get(x.id);if(f){this.pending.delete(x.id);f(x)}}catch{}}else{try{const x=unpack(await bytes(q.data)),v=this.clients.get(x.id);if(v?.readyState===1)v.send(x.data)}catch{}}});s.addEventListener('close',()=>{if(this.socket===s)this.socket=null;for(const f of this.pending.values())f({status:502,body:'{"error":"connector_disconnected"}'});this.pending.clear()});return new Response(null,{status:101,webSocket:c})}if(u.pathname==='/relay/action'&&r.method==='POST'){if(!this.socket||this.socket.readyState!==1)return Response.json({error:'relay_not_connected'},{status:503});const p=await r.json(),id=crypto.randomUUID(),a=new Promise(f=>{this.pending.set(id,f);setTimeout(()=>{if(this.pending.delete(id))f({status:504,body:'{"error":"connector_timeout"}'})},10000)});this.socket.send(JSON.stringify({type:'action',id,action:p.action,arguments:p.arguments||{}}));const x=await a;return new Response(x.body,{status:x.status,headers:{'content-type':'application/json'}})}const m=u.pathname.match(/^\/human\/([^/]+)\/vnc$/);if(m&&r.headers.get('Upgrade')?.toLowerCase()==='websocket'){if(!this.socket||this.socket.readyState!==1)return new Response('relay_not_connected',{status:503});const id=crypto.randomUUID(),p=new WebSocketPair(),c=p[0],s=p[1];s.accept();this.clients.set(id,s);s.addEventListener('close',()=>{this.clients.delete(id);this.socket?.send(JSON.stringify({type:'vnc_close',clientId:id}))});s.addEventListener('message',async q=>{if(this.socket?.readyState===1)this.socket.send(await pack(id,q.data))});this.socket.send(JSON.stringify({type:'vnc_open',clientId:id,sessionId:m[1],token:u.searchParams.get('token')||''}));return new Response(null,{status:101,webSocket:c})}return new Response('Not Found',{status:404})}}
-export default{async fetch(r,e){const u=new URL(r.url),p=u.pathname.replace(/\/+$/,'')||'/',d=e.RUNTIME_RELAY;if(p.startsWith('/human/')&&p.split('/').length===3)return new Response(page(decodeURIComponent(p.split('/')[2]),u.searchParams.get('token')||''),{headers:{'content-type':'text/html;charset=utf-8','cache-control':'no-store'}});if(d&&(p==='/relay/connect'||p==='/relay/action'||p.startsWith('/human/'))){if(p.startsWith('/human/')&&r.headers.get('Upgrade')?.toLowerCase()==='websocket')return d.get(d.idFromName(e.RUNTIME_RELAY_ID||'runtime')).fetch(r);if(!auth(r,e))return Response.json({error:'unauthorized'},{status:401});return d.get(d.idFromName(e.RUNTIME_RELAY_ID||'runtime')).fetch(r)}if(!auth(r,e))return Response.json({error:'unauthorized'},{status:401});if(r.method==='GET'&&p==='/health')return Response.json({ok:true,relay:!!d});if(p!=='/mcp')return new Response('Not Found',{status:404});if(r.method==='GET')return Response.json(manifest());let q;try{q=await r.json()}catch{return Response.json({error:'invalid_json'},{status:400})}const id=q.id??null;if(q.method==='initialize')return Response.json(rpc(id,{protocolVersion:'2025-06-18',capabilities:{tools:{listChanged:false}},serverInfo:{name:'fuf-browser-runtime-mcp',version:'0.7.2'}}));if(q.method?.startsWith('notifications/'))return new Response(null,{status:202});if(q.method==='ping')return Response.json(rpc(id,{}));if(q.method==='tools/list')return Response.json(rpc(id,{tools:TOOLS}));if(q.method!=='tools/call')return Response.json({error:'method_not_found'},{status:400});const n=q.params?.name,a=q.params?.arguments||{};if(n==='browser_runtime_manifest')return Response.json(rpc(id,txt(manifest())));const x=await d.get(d.idFromName(e.RUNTIME_RELAY_ID||'runtime')).fetch('https://relay.internal/relay/action',{method:'POST',headers:{authorization:`Bearer ${e.MCP_GATEWAY_SECRET}`,'content-type':'application/json'},body:JSON.stringify({action:n,arguments:a})});return Response.json(rpc(id,txt({status:x.status,body:await x.text()})))}};
+// FUF Browser Runtime - Cloudflare Worker
+// Serves HIL (Human-in-the-Loop) pages and relays VNC WebSocket to Bridge via Durable Object
+
+const RELAY_ID = 'runtime';
+
+function htmlPage(sessionId, token) {
+  return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>FUF Browser Runtime</title>
+<style>
+html,body,#s{margin:0;width:100%;height:100%;background:#111;color:#eee;overflow:hidden}
+#m{position:fixed;z-index:5;top:8px;left:8px;padding:8px;background:#222d;border-radius:7px;font:13px sans-serif;max-width:60%}
+#bar{position:fixed;z-index:6;bottom:0;left:0;right:0;display:none;flex-direction:column;gap:4px;background:#1a1d23;padding:6px 8px 10px;border-top:1px solid #333}
+.row{display:flex;gap:6px;align-items:center}
+button,input,textarea{font:16px sans-serif;color:#fff;background:#30343b;border:1px solid #555;border-radius:7px;padding:8px;outline:none}
+button{min-width:44px;cursor:pointer;active:opacity:.7}
+button:active{background:#444}
+textarea{flex:1;resize:none;direction:auto;min-height:40px;max-height:80px;font-size:16px}
+#login{position:fixed;z-index:10;top:50%;left:50%;transform:translate(-50%,-50%);background:#20242b;border:1px solid #555;border-radius:12px;padding:20px;width:280px;text-align:center}
+#pass{width:100%;box-sizing:border-box;margin-bottom:10px;font-size:18px;text-align:center}
+#go{width:100%;background:#356bd8;font-size:16px;padding:10px}
+.expired{display:grid!important;place-items:center;text-align:center;font:18px sans-serif;padding:20px}
+.kbtn{font-size:20px;padding:10px 14px;min-width:48px}
+</style>
+</head>
+<body>
+<div id="m">في انتظار الاتصال…</div>
+<div id="s"></div>
+<div id="login">
+  <div style="margin-bottom:12px;font-size:15px">أدخل كلمة مرور جلسة VNC</div>
+  <input id="pass" type="password" placeholder="كلمة المرور" autocomplete="off">
+  <button id="go">اتصال</button>
+</div>
+<div id="bar">
+  <div class="row">
+    <textarea id="k" placeholder="اكتب هنا ثم اضغط إرسال…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="text"></textarea>
+    <button id="send" style="background:#356bd8;min-width:60px">إرسال</button>
+  </div>
+  <div class="row">
+    <button class="kbtn" id="back">⌫</button>
+    <button class="kbtn" id="enter">↵</button>
+    <button class="kbtn" id="tab">⇥</button>
+    <button class="kbtn" id="esc">Esc</button>
+    <button id="fit" style="flex:1">⛶ ملء الشاشة</button>
+  </div>
+</div>
+<script type="module">
+const $=x=>document.getElementById(x),m=$('m'),s=$('s'),k=$('k'),login=$('login'),pass=$('pass'),bar=$('bar'),go=$('go');
+let dead=0,r=null;
+const z={Backspace:0xff08,Enter:0xff0d,Tab:0xff09,Escape:0xff1b,Delete:0xffff,ArrowLeft:0xff51,ArrowUp:0xff52,ArrowRight:0xff53,ArrowDown:0xff54};
+
+function sendKeySym(sym,down=true){
+  if(!r||dead)return;
+  try{r.sendKey(sym,null,down)}catch(e){}
+}
+
+function sendChar(ch){
+  if(!r||dead)return;
+  const code=ch.charCodeAt(0);
+  if(code<128){
+    // ASCII: send as keysym directly
+    const sym=ch.toLowerCase().charCodeAt(0);
+    sendKeySym(sym,true);
+    setTimeout(()=>sendKeySym(sym,false),50);
+  } else {
+    // Non-ASCII (Arabic etc): use clipboard paste
+    try{
+      r.clipboardPasteFrom(ch);
+    }catch(e){
+      m.textContent='تعذر إرسال: '+e.message;
+    }
+  }
+}
+
+function sendText(text){
+  if(!text||!r||dead)return;
+  // Send character by character with small delays for reliability
+  let i=0;
+  function next(){
+    if(i>=text.length||dead)return;
+    sendChar(text[i]);
+    i++;
+    if(i<text.length)setTimeout(next,30);
+  }
+  next();
+  m.textContent='تم إرسال '+text.length+' حرف';
+  setTimeout(()=>{if(!dead)m.textContent='Connected'},1500);
+}
+
+async function connect(){
+  if(!pass.value){m.textContent='أدخل كلمة المرور';return}
+  m.textContent='جاري الاتصال…';
+  go.disabled=true;
+  try{
+    const mod=await import('https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/lib/rfb.js/+esm');
+    const RFB=mod.default?.default||mod.default||mod.RFB;
+    if(typeof RFB!=='function')throw Error('RFB unavailable');
+    login.style.display='none';
+    m.textContent='Connecting…';
+    const wsUrl='wss://${new URL(`https://fuf-browser-runtime-mcp.gacfzv.workers.dev`).host}/human/${sessionId}/vnc?token=${token}';
+    r=new RFB(s,wsUrl,{credentials:{password:pass.value}});
+    r.scaleViewport=true;
+    r.resizeSession=true;
+    r.focusOnClick=true;
+    r.addEventListener('connect',()=>{
+      m.textContent='Connected';
+      bar.style.display='flex';
+      k.focus();
+    });
+    r.addEventListener('disconnect',()=>{
+      if(!dead){
+        m.textContent='انقطع الاتصال';
+        login.style.display='block';
+        go.disabled=false;
+        bar.style.display='none';
+      }
+    });
+    r.addEventListener('credentialsrequired',()=>{
+      login.style.display='block';
+      m.textContent='كلمة المرور مطلوبة';
+      go.disabled=false;
+    });
+    r.addEventListener('securityfailure',()=>{
+      login.style.display='block';
+      m.textContent='كلمة المرور غير صحيحة';
+      go.disabled=false;
+    });
+  }catch(e){
+    m.textContent='فشل: '+e.message;
+    go.disabled=false;
+    login.style.display='block';
+  }
+}
+
+go.addEventListener('click',connect);
+pass.addEventListener('keydown',e=>{if(e.key==='Enter')connect()});
+
+// Send button: sends all text in textarea
+$('send').addEventListener('click',()=>{
+  const v=k.value.trim();
+  if(v){sendText(v);k.value=''}
+});
+
+// Also send on Enter in textarea (Shift+Enter for newline)
+k.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey){
+    e.preventDefault();
+    const v=k.value.trim();
+    if(v){sendText(v);k.value=''}
+    // Also send Enter key after text
+    setTimeout(()=>sendKeySym(0xff0d,true),100);
+    setTimeout(()=>sendKeySym(0xff0d,false),150);
+  }
+  // Special keys
+  if(z[e.key]){
+    e.preventDefault();
+    sendKeySym(z[e.key],true);
+    setTimeout(()=>sendKeySym(z[e.key],false),50);
+  }
+});
+
+$('enter').addEventListener('click',()=>{sendKeySym(0xff0d,true);setTimeout(()=>sendKeySym(0xff0d,false),50)});
+$('back').addEventListener('click',()=>{sendKeySym(0xff08,true);setTimeout(()=>sendKeySym(0xff08,false),50)});
+$('tab').addEventListener('click',()=>{sendKeySym(0xff09,true);setTimeout(()=>sendKeySym(0xff09,false),50)});
+$('esc').addEventListener('click',()=>{sendKeySym(0xff1b,true);setTimeout(()=>sendKeySym(0xff1b,false),50)});
+$('fit').addEventListener('click',()=>{if(r){r.scaleViewport=true;r.resizeSession=true;r.focus()}});
+
+// Auto-focus textarea when tapping on canvas area
+s.addEventListener('click',()=>{if(r&&!dead)k.focus()});
+
+// TTL expiry
+setTimeout(()=>{
+  dead=1;
+  if(r)r.disconnect();
+  s.className='expired';
+  s.innerHTML='<div>انتهت جلسة التدخل<br><small>Human intervention session expired.</small></div>';
+  bar.remove();login.remove();m.remove();
+},900000);
+</script>
+</body>
+</html>`;
+}
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    const path = url.pathname;
+
+    // MCP endpoint
+    if (path === '/mcp') {
+      return handleMCP(request, env);
+    }
+
+    // Human HIL page
+    const humanMatch = path.match(/^\\/human\\/([^\\/]+)$/);
+    if (humanMatch && request.method === 'GET') {
+      const sessionId = humanMatch[1];
+      const token = url.searchParams.get('token');
+      if (!token) return new Response('Missing token', { status: 400 });
+      return new Response(htmlPage(sessionId, token), {
+        headers: { 'content-type': 'text/html;charset=utf-8' }
+      });
+    }
+
+    // VNC WebSocket relay
+    const vncMatch = path.match(/^\\/human\\/([^\\/]+)\\/vnc$/);
+    if (vncMatch && request.headers.get('Upgrade') === 'websocket') {
+      const sessionId = vncMatch[1];
+      const token = url.searchParams.get('token');
+      if (!token) return new Response('Missing token', { status: 401 });
+
+      const relayId = env.RUNTIME_RELAY_ID || RELAY_ID;
+      const relay = env.RUNTIME_RELAY.get(env.RUNTIME_RELAY.idFromName(relayId));
+
+      // Create a pair: client <-> worker <-> relay
+      const { 0: clientWs, 1: workerWs } = new WebSocketPair();
+      workerWs.accept();
+
+      // Connect to relay
+      const relayUrl = new URL(request.url);
+      relayUrl.pathname = '/relay/connect';
+      relayUrl.searchParams.set('session', sessionId);
+      relayUrl.searchParams.set('token', token);
+      relayUrl.searchParams.set('type', 'vnc');
+
+      const relayResp = await relay.fetch(relayUrl.toString(), {
+        headers: { Upgrade: 'websocket' },
+      });
+
+      if (relayResp.status !== 101) {
+        workerWs.close(1006, 'Relay connection failed');
+        return new Response('Relay failed', { status: 502 });
+      }
+
+      const relayWs = relayResp.webSocket;
+      relayWs.accept();
+
+      // Bridge: client <-> relay
+      workerWs.addEventListener('message', (e) => {
+        try { relayWs.send(e.data); } catch (_) {}
+      });
+      workerWs.addEventListener('close', () => {
+        try { relayWs.close(); } catch (_) {}
+      });
+      relayWs.addEventListener('message', (e) => {
+        try { workerWs.send(e.data); } catch (_) {}
+      });
+      relayWs.addEventListener('close', () => {
+        try { workerWs.close(); } catch (_) {}
+      });
+
+      return new Response(null, { status: 101, webSocket: clientWs });
+    }
+
+    return new Response('Not found', { status: 404 });
+  }
+};
+
+async function handleMCP(request, env) {
+  // Simplified MCP handler - delegates to the actual MCP logic
+  // This is a placeholder; the real MCP handling is in the deployed worker
+  return new Response(JSON.stringify({ error: 'Use the /mcp endpoint with proper MCP protocol' }), {
+    status: 400,
+    headers: { 'content-type': 'application/json' }
+  });
+}
