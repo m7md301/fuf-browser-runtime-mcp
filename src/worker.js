@@ -5,8 +5,9 @@
 // ============================================
 const VNC_TTL_MS = 900000; // 15 minutes
 const RELAY_TIMEOUT_MS = 60000;
-const WORKER_VERSION = '0.4.1';
+const WORKER_VERSION = '0.4.2';
 const RELAY_ID_DEFAULT = 'runtime';
+const NOVNC_RFB_URL = 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.4.0/core/rfb.js';
 
 // ============================================
 // TOOLS DEFINITION (Decoupling)
@@ -115,7 +116,7 @@ textarea{flex:1;resize:none;direction:auto;min-height:44px}
   </div>
 </div>
 <script type="module">
-import RFB from 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/core/rfb.js';
+import RFB from '${NOVNC_RFB_URL}';
 
 const $ = x => document.getElementById(x);
 const m = $('m'), s = $('s'), k = $('k'), login = $('login'), pass = $('pass'), bar = $('bar'), go = $('go');
@@ -139,7 +140,7 @@ function sendText(v) {
   m.textContent = 'تم إرسال ' + v.length + ' حرف';
 }
 
-async function connect() {
+function connect() {
   if (!pass.value) { m.textContent = 'أدخل كلمة المرور'; return; }
   m.textContent = 'جاري الاتصال…';
   go.disabled = true;
