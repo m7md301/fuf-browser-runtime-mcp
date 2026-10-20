@@ -5,7 +5,7 @@
 // ============================================
 const VNC_TTL_MS = 900000; // 15 minutes
 const RELAY_TIMEOUT_MS = 60000;
-const WORKER_VERSION = '0.4.0';
+const WORKER_VERSION = '0.4.1';
 const RELAY_ID_DEFAULT = 'runtime';
 
 // ============================================
@@ -73,7 +73,7 @@ function getManifest() {
 }
 
 // ============================================
-// HIL PAGE GENERATOR (Extract Method + Keyboard Fix)
+// HIL PAGE GENERATOR (Extract Method + Keyboard Fix + RFB Fix)
 // ============================================
 function generateHilPage(sessionId, token) {
   const wsUrl = `wss://fuf-browser-runtime-mcp.gacfzv.workers.dev/human/${encodeURIComponent(sessionId)}/vnc?token=${encodeURIComponent(token)}`;
@@ -145,13 +145,13 @@ async function connect() {
   go.disabled = true;
   try {
     login.style.display = 'none';
-    r = new RFB(s, ${JSON.stringify(wsUrl)}, { credentials: { password: pass.value } });
+    r = new RFB(s, ${JSON.stringify(wsUrl)});
     r.scaleViewport = true;
     r.resizeSession = true;
     r.focusOnClick = true;
     r.addEventListener('connect', () => { m.textContent = 'متصل · اكتب في الحقل السفلي'; bar.style.display = 'flex'; });
     r.addEventListener('disconnect', () => { if (!dead) { m.textContent = 'انقطع الاتصال'; login.style.display = 'block'; go.disabled = false; } });
-    r.addEventListener('credentialsrequired', () => { login.style.display = 'block'; m.textContent = 'كلمة المرور مطلوبة'; go.disabled = false; });
+    r.addEventListener('credentialsrequired', () => { r.sendCredentials({ password: pass.value }); });
     r.addEventListener('securityfailure', () => { login.style.display = 'block'; m.textContent = 'كلمة المرور غير صحيحة'; go.disabled = false; });
   } catch (e) {
     m.textContent = 'فشل الاتصال: ' + e.message;
@@ -173,7 +173,7 @@ k.addEventListener('compositionend', () => {
   sendText(v);
 });
 k.addEventListener('input', () => {
-  if (composing) return; // Wait for compositionend for IME
+  if (composing) return;
   const v = k.value;
   k.value = '';
   sendText(v);
@@ -237,22 +237,18 @@ export class RuntimeRelay {
   async fetch(req) {
     const u = new URL(req.url);
     
-    // Guard Clause: Auth check (except /human/ paths)
     if (!isAuthenticated(req, this.env) && !u.pathname.startsWith('/human/')) {
       return unauthorizedResponse();
     }
 
-    // WebSocket Relay Connect
     if (u.pathname === '/relay/connect' && req.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
       return this.handleRelayConnect(req);
     }
 
-    // Relay Action (MCP tool calls)
     if (u.pathname === '/relay/action' && req.method === 'POST') {
       return this.handleRelayAction(req);
     }
 
-    // VNC WebSocket Proxy (Regex fixed: no double escaping)
     const vncMatch = u.pathname.match(/^\/human\/([^\/]+)\/vnc$/);
     if (vncMatch && req.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
       return this.handleVncProxy(req, vncMatch[1]);
@@ -334,14 +330,12 @@ export default {
   async fetch(req, env) {
     const u = new URL(req.url), relay = env.RUNTIME_RELAY;
 
-    // Guard Clause: HIL Page (no auth needed)
     if (u.pathname.startsWith('/human/') && u.pathname.split('/').length === 3) {
       const id = decodeURIComponent(u.pathname.split('/')[2]);
       const token = u.searchParams.get('token') || '';
       return new Response(generateHilPage(id, token), { headers: { 'content-type': 'text/html;charset=utf-8' } });
     }
 
-    // Guard Clause: Relay routes
     if (relay && (u.pathname === '/relay/connect' || u.pathname === '/relay/action' || u.pathname.startsWith('/human/'))) {
       if (u.pathname.startsWith('/human/') && req.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
         return relay.get(relay.idFromName(env.RUNTIME_RELAY_ID || RELAY_ID_DEFAULT)).fetch(req);
@@ -350,24 +344,19 @@ export default {
       return relay.get(relay.idFromName(env.RUNTIME_RELAY_ID || RELAY_ID_DEFAULT)).fetch(req);
     }
 
-    // Guard Clause: Auth for everything else
     if (!isAuthenticated(req, env)) return unauthorizedResponse();
 
-    // Health check
     if (req.method === 'GET' && u.pathname === '/health') {
       return Response.json({ ok: true, service: 'fuf-browser-runtime-mcp' });
     }
 
-    // MCP endpoint only
     if (u.pathname !== '/mcp') return new Response('Not Found', { status: 404 });
     if (req.method === 'GET') return Response.json(getManifest());
 
-    // Parse JSON-RPC
     let m;
     try { m = await req.json(); } catch { return Response.json(jsonRpcError(null, -32700, 'Invalid JSON'), { status: 400 }); }
     const id = m.id ?? null;
 
-    // JSON-RPC methods (Guard Clauses)
     if (m.method === 'initialize') {
       return Response.json(jsonRpcResult(id, { protocolVersion: '2025-06-18', capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'fuf-browser-runtime-mcp', version: WORKER_VERSION } }));
     }
@@ -378,7 +367,6 @@ export default {
     if (m.method === 'tools/list') return Response.json(jsonRpcResult(id, { tools: TOOLS }));
     if (m.method !== 'tools/call') return Response.json(jsonRpcError(id, -32601, 'Method not found'));
 
-    // Tool call handling
     const name = m.params?.name, args = m.params?.arguments || {};
     if (!TOOLS.some(x => x.name === name)) return Response.json(jsonRpcError(id, -32602, `Unknown tool: ${name}`));
     if (name === 'browser_runtime_manifest') return Response.json(jsonRpcResult(id, textContent(getManifest())));
