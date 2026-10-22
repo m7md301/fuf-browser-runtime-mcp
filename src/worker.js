@@ -5,18 +5,89 @@
 // ============================================
 const VNC_TTL_MS = 900000; // 15 minutes
 const RELAY_TIMEOUT_MS = 60000;
-const WORKER_VERSION = '0.4.4';
+const WORKER_VERSION = '0.4.5';
 const RELAY_ID_DEFAULT = 'runtime';
 const NOVNC_RFB_URL = 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.4.0/core/rfb.js';
+
+
+// ============================================
+// SKILL TEXT (read-first guide for any agent using this runtime)
+// ============================================
+const SKILL_TEXT = [
+  '# FUF Browser Runtime: اقرأ هذا قبل استخدام المتصفح',
+  '',
+  'متصفح Chromium دائم يعمل على جهاز المستخدم، تتحكم به أنت. وجلسة تدخل بشري مؤقتة يستخدمها المستخدم فقط للكابتشا وكلمات السر والتحقق بخطوتين. بعد أن ينتهي يكمل المساعد من نفس المتصفح ونفس التبويبات.',
+  '',
+  '## 1. كيف تبدأ',
+  '',
+  'الحالة الأولى: عندك shell على الجهاز (المسار /root/browser-agent). شغّل هذا الأمر فقط ولا تفحص قبله:',
+  '',
+  '    cd /root/browser-agent && ./fuf up',
+  '',
+  'آمن للتكرار. إن ظهر خلل شغّل ./fuf doctor فيكتب لك سبب كل خلل وأمر إصلاحه. لا تخمّن منافذ أو مسارات بديلة.',
+  '',
+  'الحالة الثانية: ليس عندك shell. استدعِ browser_runtime_status ثم browser_runtime_enable. التحكم بالصفحات نفسه يحتاج shell، فأخبر المستخدم إن لم يتوفر.',
+  '',
+  '## 2. التحكم بالمتصفح (من shell)',
+  '',
+  '    ./fuf browse navigate <رابط>      فتح صفحة',
+  '    ./fuf browse snapshot             قراءة النص والعناصر',
+  '    ./fuf browse click <نص>           ضغط عنصر',
+  '    ./fuf browse type <نص>            كتابة في الحقل المحدد',
+  '    ./fuf browse press Enter          ضغط مفتاح',
+  '    ./fuf browse screenshot <اسم>     لقطة شاشة',
+  '    ./fuf browse tabs                 التبويبات المفتوحة (لترى ما فتحه المستخدم)',
+  '',
+  'المتصفح المحلي هو المسار الأساسي. أدوات MCP هذه لإدارة الجلسة وطلب المستخدم، وليست للتحكم بالصفحات.',
+  '',
+  '## 3. متى تطلب تدخل المستخدم',
+  '',
+  'استدعِ browser_request_human فقط عند:',
+  '- كابتشا أو تحدٍّ مرئي يحتاج إنساناً.',
+  '- كلمة سر لا يجب أن تقرأها أو تخزنها.',
+  '- رمز OTP أو تحقق بخطوتين يكتبه المستخدم.',
+  '- موافقة أمنية لا يصح أن تنفذها نيابة عنه.',
+  '',
+  'لا تطلبه لأن الصفحة بطيئة أو لأن عنصراً يحتاج ضغطة عادية. جرّب التحكم المحلي أولاً. ولا تحاول حل الكابتشا أو تجاوزها بنفسك.',
+  '',
+  '## 4. خطوات الجلسة البشرية',
+  '',
+  '1. أوصل المتصفح إلى الصفحة الصحيحة أولاً.',
+  '2. استدعِ browser_request_human مع reason واضح وttlSeconds (الأقصى 900).',
+  '3. اعرض للمستخدم الرابط وكلمة السر فقط. لا تحفظهما في الذاكرة أو الملفات.',
+  '4. انتظر حتى يقول إنه انتهى.',
+  '5. استدعِ browser_human_done فوراً ثم أكمل المهمة من نفس التبويب.',
+  '',
+  'الجلسة تنتهي وحدها بعد 15 دقيقة كحد أقصى. إن انتهت قبل أن يفتح الرابط فأنشئ جلسة جديدة ولا تعيد استخدام القديمة. بعد browser_human_done يبقى Chromium شغالاً.',
+  '',
+  '## 5. أدوات MCP',
+  '',
+  '- browser_runtime_skill: هذا الدليل.',
+  '- browser_runtime_status: حالة Chromium وXvfb والجسر والاتصال والجلسة البشرية.',
+  '- browser_runtime_enable: تشغيل المتصفح صراحة. لا يعيد أسرار جلسة قديمة.',
+  '- browser_request_human: جلسة بشرية جديدة (رابط وكلمة سر).',
+  '- browser_human_done: إنهاء الجلسة البشرية فقط.',
+  '- browser_runtime_disable: إنهاء الجلسة البشرية المؤقتة.',
+  '- browser_runtime_manifest: وصف مختصر للخدمة.',
+  '',
+  '## 6. قواعد',
+  '',
+  '- لا تغلق Chromium ولا تحذف مجلد profile: فيه جلسات المستخدم.',
+  '- لا تستخدم ./fuf down أثناء مهمة جارية إلا بطلب صريح.',
+  '- لا تكتب MCP_GATEWAY_SECRET ولا كلمات سر الجلسات في الذاكرة.',
+  '- مانع الإعلانات مفعّل. إن كسر موقعاً فعدّل إعداده للموقع بدل إزالته.',
+  '- الصفحة البشرية تدعم العربية والإنجليزية والحذف.'
+].join('\n');
 
 // ============================================
 // TOOLS DEFINITION (Decoupling)
 // ============================================
 const TOOLS = [
+  { name: 'browser_runtime_skill', description: 'READ THIS FIRST before using the browser or requesting human help. Returns the usage guide: how to start, when to request the user, and the exact steps.', inputSchema: { type: 'object', properties: {} } },
   { name: 'browser_runtime_enable', description: 'Enable browser runtime explicitly and wait until ready.', inputSchema: { type: 'object', properties: {} } },
   { name: 'browser_runtime_status', description: 'Return complete runtime and relay status.', inputSchema: { type: 'object', properties: {} } },
   { name: 'browser_runtime_disable', description: 'Disable runtime and close temporary sessions.', inputSchema: { type: 'object', properties: {} } },
-  { name: 'browser_request_human', description: 'Create a temporary human intervention session.', inputSchema: { type: 'object', properties: { reason: { type: 'string' }, ttlSeconds: { type: 'number' } }, required: ['reason'] } },
+  { name: 'browser_request_human', description: 'Create a temporary human intervention session (CAPTCHA, passwords, OTP only). Call browser_runtime_skill first if you have not read it.', inputSchema: { type: 'object', properties: { reason: { type: 'string' }, ttlSeconds: { type: 'number' } }, required: ['reason'] } },
   { name: 'browser_human_done', description: 'Mark current human intervention complete.', inputSchema: { type: 'object', properties: {} } },
   { name: 'browser_runtime_manifest', description: 'Return a portable runtime description.', inputSchema: { type: 'object', properties: { format: { type: 'string', enum: ['text', 'json'] } } } }
 ];
@@ -397,7 +468,7 @@ export default {
     const id = m.id ?? null;
 
     if (m.method === 'initialize') {
-      return Response.json(jsonRpcResult(id, { protocolVersion: '2025-06-18', capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'fuf-browser-runtime-mcp', version: WORKER_VERSION } }));
+      return Response.json(jsonRpcResult(id, { protocolVersion: '2025-06-18', capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'fuf-browser-runtime-mcp', version: WORKER_VERSION }, instructions: 'Before using the browser, call browser_runtime_skill and follow it.' }));
     }
     if (m.method === 'notifications/initialized' || m.method === 'notifications/cancelled') {
       return new Response(null, { status: 202 });
@@ -409,6 +480,7 @@ export default {
     const name = m.params?.name, args = m.params?.arguments || {};
     if (!TOOLS.some(x => x.name === name)) return Response.json(jsonRpcError(id, -32602, `Unknown tool: ${name}`));
     if (name === 'browser_runtime_manifest') return Response.json(jsonRpcResult(id, textContent(getManifest())));
+    if (name === 'browser_runtime_skill') return Response.json(jsonRpcResult(id, textContent(SKILL_TEXT)));
     if (!relay) return Response.json(jsonRpcResult(id, textContent({ ok: false, status: 'relay_not_configured' })));
 
     const r = await relay.get(relay.idFromName(env.RUNTIME_RELAY_ID || RELAY_ID_DEFAULT)).fetch('https://relay.internal/relay/action', {
