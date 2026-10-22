@@ -5,7 +5,7 @@
 // ============================================
 const VNC_TTL_MS = 900000; // 15 minutes
 const RELAY_TIMEOUT_MS = 60000;
-const WORKER_VERSION = '0.4.6';
+const WORKER_VERSION = '0.4.7';
 const RELAY_ID_DEFAULT = 'runtime';
 const NOVNC_RFB_URL = 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.4.0/core/rfb.js';
 
@@ -20,13 +20,17 @@ const SKILL_TEXT = [
   '',
   '## 1. كيف تبدأ',
   '',
+  'المتصفح قد يكون مطفأً، وهذا طبيعي وليس عطلاً. لا يعمل من نفسه: إذا أُعيد تشغيل الهاتف أو أوقف النظام Termux تتوقف كل الأجزاء. وتشغيله أمر واحد، وأنت من يشغّله، لا تطلب من المستخدم شيئاً.',
+  '',
   'الحالة الأولى: عندك shell على الجهاز (المسار /root/browser-agent). شغّل هذا الأمر فقط ولا تفحص قبله:',
   '',
   '    cd /root/browser-agent && ./fuf up',
   '',
-  'آمن للتكرار. إن ظهر خلل شغّل ./fuf doctor فيكتب لك سبب كل خلل وأمر إصلاحه. لا تخمّن منافذ أو مسارات بديلة.',
+  'آمن للتكرار، ويشغّل المتصفح والشاشة والجسر ومراقب الجسر. إن ظهر خلل شغّل ./fuf doctor فيكتب لك سبب كل خلل وأمر إصلاحه. لا تخمّن منافذ أو مسارات بديلة.',
   '',
-  'الحالة الثانية: ليس عندك shell. استدعِ browser_runtime_status ثم browser_runtime_enable. التحكم بالصفحات نفسه يحتاج shell، فأخبر المستخدم إن لم يتوفر.',
+  'علامات أن المتصفح مطفأ: browser_runtime_status يرجع chromium أو cdp بقيمة false، أو ./fuf status يكتب «لا» أمام المتصفح، أو يفشل أي أمر ./fuf browse. الحل دائماً ./fuf up ثم أعد المحاولة.',
+  '',
+  'الحالة الثانية: ليس عندك shell. استدعِ browser_runtime_status. إن كان المتصفح مطفأً فجرّب browser_runtime_enable. وإن رجعت الأدوات relay_not_connected أو 503 فالجسر نفسه مطفأ ولا يمكن تشغيله عن بُعد، فأخبر المستخدم أن يشغّل في Termux هذا الأمر فقط: cd /root/browser-agent && ./fuf up',
   '',
   '## 2. التحكم بالمتصفح (من shell)',
   '',
@@ -61,6 +65,8 @@ const SKILL_TEXT = [
   'الجلسة تنتهي وحدها بعد 15 دقيقة كحد أقصى. إن انتهت قبل أن يفتح الرابط فأنشئ جلسة جديدة ولا تعيد استخدام القديمة. بعد browser_human_done يبقى Chromium شغالاً.',
   '',
   '## 5. أدوات MCP',
+  '',
+  'الأدوات التي بلا معاملات (status وenable وdisable وhuman_done وskill) تحتاج معاملاً اسمه note: مرّر note بقيمة ok. الخادم يتجاهله، لكن بعض العملاء يفشلون بـ Failed to parse arguments إن أُرسلت أداة بلا وسيطات.',
   '',
   '- browser_runtime_skill: هذا الدليل.',
   '- browser_runtime_status: حالة Chromium وXvfb والجسر والاتصال والجلسة البشرية.',
