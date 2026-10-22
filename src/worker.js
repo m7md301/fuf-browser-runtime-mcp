@@ -5,7 +5,7 @@
 // ============================================
 const VNC_TTL_MS = 900000; // 15 minutes
 const RELAY_TIMEOUT_MS = 60000;
-const WORKER_VERSION = '0.4.5';
+const WORKER_VERSION = '0.4.6';
 const RELAY_ID_DEFAULT = 'runtime';
 const NOVNC_RFB_URL = 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.4.0/core/rfb.js';
 
@@ -83,12 +83,12 @@ const SKILL_TEXT = [
 // TOOLS DEFINITION (Decoupling)
 // ============================================
 const TOOLS = [
-  { name: 'browser_runtime_skill', description: 'READ THIS FIRST before using the browser or requesting human help. Returns the usage guide: how to start, when to request the user, and the exact steps.', inputSchema: { type: 'object', properties: {} } },
-  { name: 'browser_runtime_enable', description: 'Enable browser runtime explicitly and wait until ready.', inputSchema: { type: 'object', properties: {} } },
-  { name: 'browser_runtime_status', description: 'Return complete runtime and relay status.', inputSchema: { type: 'object', properties: {} } },
-  { name: 'browser_runtime_disable', description: 'Disable runtime and close temporary sessions.', inputSchema: { type: 'object', properties: {} } },
+  { name: 'browser_runtime_skill', description: 'READ THIS FIRST before using the browser or requesting human help. Returns the usage guide: how to start, when to request the user, and the exact steps.', inputSchema: { type: 'object', properties: { note: { type: 'string', description: 'Pass any short text such as ok. Ignored by the server. It exists only so clients always send valid JSON arguments.' } }, required: ['note'] } },
+  { name: 'browser_runtime_enable', description: 'Enable browser runtime explicitly and wait until ready.', inputSchema: { type: 'object', properties: { note: { type: 'string', description: 'Pass any short text such as ok. Ignored by the server. It exists only so clients always send valid JSON arguments.' } }, required: ['note'] } },
+  { name: 'browser_runtime_status', description: 'Return complete runtime and relay status.', inputSchema: { type: 'object', properties: { note: { type: 'string', description: 'Pass any short text such as ok. Ignored by the server. It exists only so clients always send valid JSON arguments.' } }, required: ['note'] } },
+  { name: 'browser_runtime_disable', description: 'Disable runtime and close temporary sessions.', inputSchema: { type: 'object', properties: { note: { type: 'string', description: 'Pass any short text such as ok. Ignored by the server. It exists only so clients always send valid JSON arguments.' } }, required: ['note'] } },
   { name: 'browser_request_human', description: 'Create a temporary human intervention session (CAPTCHA, passwords, OTP only). Call browser_runtime_skill first if you have not read it.', inputSchema: { type: 'object', properties: { reason: { type: 'string' }, ttlSeconds: { type: 'number' } }, required: ['reason'] } },
-  { name: 'browser_human_done', description: 'Mark current human intervention complete.', inputSchema: { type: 'object', properties: {} } },
+  { name: 'browser_human_done', description: 'Mark current human intervention complete.', inputSchema: { type: 'object', properties: { note: { type: 'string', description: 'Pass any short text such as ok. Ignored by the server. It exists only so clients always send valid JSON arguments.' } }, required: ['note'] } },
   { name: 'browser_runtime_manifest', description: 'Return a portable runtime description.', inputSchema: { type: 'object', properties: { format: { type: 'string', enum: ['text', 'json'] } } } }
 ];
 
