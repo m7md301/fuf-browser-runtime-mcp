@@ -5,7 +5,7 @@
 // ============================================
 const VNC_TTL_MS = 900000; // 15 minutes
 const RELAY_TIMEOUT_MS = 60000;
-const WORKER_VERSION = '0.4.2';
+const WORKER_VERSION = '0.4.3';
 const RELAY_ID_DEFAULT = 'runtime';
 const NOVNC_RFB_URL = 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.4.0/core/rfb.js';
 
@@ -124,20 +124,34 @@ let dead = 0, r = null;
 
 const syms = { Backspace: 0xff08, Enter: 0xff0d, Tab: 0xff09, Escape: 0xff1b, Delete: 0xffff, ArrowLeft: 0xff51, ArrowUp: 0xff52, ArrowRight: 0xff53, ArrowDown: 0xff54 };
 
+// X11 keysyms: Latin-1 characters map to themselves; any other Unicode
+// character (Arabic, emoji, ...) is 0x01000000 + its code point.
+const LATIN1_MAX = 0xff;
+const UNICODE_KEYSYM_BASE = 0x01000000;
+const NEWLINE_CODE_POINT = 0x0a;
+
+function toKeysym(codePoint) {
+  if (codePoint === NEWLINE_CODE_POINT) return syms.Enter;
+  return codePoint <= LATIN1_MAX ? codePoint : UNICODE_KEYSYM_BASE + codePoint;
+}
+
 function sendKey(x, down = true) {
   if (!r || dead) return;
-  const z = syms[x] ?? (x.length === 1 ? x.charCodeAt(0) : 0);
+  const isSingleChar = [...x].length === 1;
+  const z = syms[x] ?? (isSingleChar ? toKeysym(x.codePointAt(0)) : 0);
   if (z) r.sendKey(z, null, down);
 }
 
 function sendText(v) {
   if (!v || !r || dead) return;
-  for (let i = 0; i < v.length; i++) {
-    const c = v.charCodeAt(i);
-    r.sendKey(c, null, true);
-    r.sendKey(c, null, false);
+  let count = 0;
+  for (const ch of v) {
+    const keysym = toKeysym(ch.codePointAt(0));
+    r.sendKey(keysym, null, true);
+    r.sendKey(keysym, null, false);
+    count++;
   }
-  m.textContent = 'تم إرسال ' + v.length + ' حرف';
+  m.textContent = 'تم إرسال ' + count + ' حرف';
 }
 
 function connect() {
