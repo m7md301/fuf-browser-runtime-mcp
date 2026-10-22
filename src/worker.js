@@ -5,7 +5,7 @@
 // ============================================
 const VNC_TTL_MS = 900000; // 15 minutes
 const RELAY_TIMEOUT_MS = 60000;
-const WORKER_VERSION = '0.4.3';
+const WORKER_VERSION = '0.4.4';
 const RELAY_ID_DEFAULT = 'runtime';
 const NOVNC_RFB_URL = 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.4.0/core/rfb.js';
 
@@ -135,11 +135,13 @@ function toKeysym(codePoint) {
   return codePoint <= LATIN1_MAX ? codePoint : UNICODE_KEYSYM_BASE + codePoint;
 }
 
-function sendKey(x, down = true) {
+// Press and release together: noVNC sends both events when the down argument is omitted.
+// Sending only "down" made x11vnc drop repeated presses (Backspace worked once).
+function sendKey(x) {
   if (!r || dead) return;
   const isSingleChar = [...x].length === 1;
-  const z = syms[x] ?? (isSingleChar ? toKeysym(x.codePointAt(0)) : 0);
-  if (z) r.sendKey(z, null, down);
+  const keysym = syms[x] ?? (isSingleChar ? toKeysym(x.codePointAt(0)) : 0);
+  if (keysym) r.sendKey(keysym);
 }
 
 function sendText(v) {
@@ -147,8 +149,7 @@ function sendText(v) {
   let count = 0;
   for (const ch of v) {
     const keysym = toKeysym(ch.codePointAt(0));
-    r.sendKey(keysym, null, true);
-    r.sendKey(keysym, null, false);
+    r.sendKey(keysym);
     count++;
   }
   m.textContent = 'تم إرسال ' + count + ' حرف';
@@ -195,7 +196,30 @@ k.addEventListener('input', () => {
 });
 
 $('enter').addEventListener('click', () => sendKey('Enter'));
-$('back').addEventListener('click', () => sendKey('Backspace'));
+
+// Backspace button: one tap deletes one character; holding repeats.
+const REPEAT_DELAY_MS = 400;
+const REPEAT_INTERVAL_MS = 70;
+let repeatDelayTimer = null, repeatTimer = null;
+
+function stopRepeat() {
+  clearTimeout(repeatDelayTimer);
+  clearInterval(repeatTimer);
+}
+
+function startRepeat(key) {
+  stopRepeat();
+  sendKey(key);
+  repeatDelayTimer = setTimeout(() => {
+    repeatTimer = setInterval(() => sendKey(key), REPEAT_INTERVAL_MS);
+  }, REPEAT_DELAY_MS);
+}
+
+const backButton = $('back');
+backButton.addEventListener('pointerdown', e => { e.preventDefault(); startRepeat('Backspace'); });
+for (const type of ['pointerup', 'pointerleave', 'pointercancel']) {
+  backButton.addEventListener(type, stopRepeat);
+}
 $('fit').addEventListener('click', () => { if (r) { r.scaleViewport = true; r.resizeSession = true; r.focus(); } });
 
 k.addEventListener('keydown', e => {
