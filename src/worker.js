@@ -8,6 +8,7 @@ const RELAY_TIMEOUT_MS = 60000;
 const WORKER_VERSION = '0.4.7';
 const RELAY_ID_DEFAULT = 'runtime';
 
+
 // Read-first guide exposed through the MCP skill tool.
 const SKILL_TEXT = [
   '# FUF Browser Runtime: اقرأ هذا قبل استخدام المتصفح', '',
@@ -84,7 +85,7 @@ function getManifest() {
 }
 
 // ============================================
-// HIL PAGE GENERATOR (Extract Method + Keyboard Fix)
+// HIL PAGE GENERATOR (Extract Method + Keyboard Fix + RFB Fix)
 // ============================================
 function generateHilPage(sessionId, token) {
   const wsUrl = `wss://fuf-browser-runtime-mcp.gacfzv.workers.dev/human/${encodeURIComponent(sessionId)}/vnc?token=${encodeURIComponent(token)}`;
@@ -126,7 +127,7 @@ textarea{flex:1;resize:none;direction:auto;min-height:44px}
   </div>
 </div>
 <script type="module">
-import RFB from 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.4.0/core/rfb.js';
+import RFB from '${NOVNC_RFB_URL}';
 
 const $ = x => document.getElementById(x);
 const m = $('m'), s = $('s'), k = $('k'), login = $('login'), pass = $('pass'), bar = $('bar'), go = $('go');
@@ -134,7 +135,8 @@ let dead = 0, r = null;
 
 const syms = { Backspace: 0xff08, Enter: 0xff0d, Tab: 0xff09, Escape: 0xff1b, Delete: 0xffff, ArrowLeft: 0xff51, ArrowUp: 0xff52, ArrowRight: 0xff53, ArrowDown: 0xff54 };
 
-// X11 keysyms: Latin-1 characters map to themselves; other Unicode uses the X11 Unicode range.
+// X11 keysyms: Latin-1 characters map to themselves; any other Unicode
+// character (Arabic, emoji, ...) is 0x01000000 + its code point.
 const LATIN1_MAX = 0xff;
 const UNICODE_KEYSYM_BASE = 0x01000000;
 const NEWLINE_CODE_POINT = 0x0a;
@@ -144,7 +146,8 @@ function toKeysym(codePoint) {
   return codePoint <= LATIN1_MAX ? codePoint : UNICODE_KEYSYM_BASE + codePoint;
 }
 
-// Press and release together; this also preserves repeated Backspace behavior.
+// Press and release together: noVNC sends both events when the down argument is omitted.
+// Sending only "down" made x11vnc drop repeated presses (Backspace worked once).
 function sendKey(x) {
   if (!r || dead) return;
   const isSingleChar = [...x].length === 1;
@@ -156,13 +159,14 @@ function sendText(v) {
   if (!v || !r || dead) return;
   let count = 0;
   for (const ch of v) {
-    r.sendKey(toKeysym(ch.codePointAt(0)));
+    const keysym = toKeysym(ch.codePointAt(0));
+    r.sendKey(keysym);
     count++;
   }
   m.textContent = 'تم إرسال ' + count + ' حرف';
 }
 
-async function connect() {
+function connect() {
   if (!pass.value) { m.textContent = 'أدخل كلمة المرور'; return; }
   m.textContent = 'جاري الاتصال…';
   go.disabled = true;
@@ -230,7 +234,7 @@ k.addEventListener('compositionend', () => {
   sendText(v);
 });
 k.addEventListener('input', () => {
-  if (composing) return; // Wait for compositionend for IME
+  if (composing) return;
   const v = k.value;
   k.value = '';
   sendText(v);
@@ -238,16 +242,17 @@ k.addEventListener('input', () => {
 
 $('enter').addEventListener('click', () => sendKey('Enter'));
 
-// Backspace: one tap deletes once; holding repeats without affecting other controls.
+// Backspace button: one tap deletes one character; holding repeats.
 const REPEAT_DELAY_MS = 400;
 const REPEAT_INTERVAL_MS = 70;
-let repeatDelayTimer = null, repeatTimer = null;
+
 function stopRepeat() {
   clearTimeout(repeatDelayTimer);
   clearInterval(repeatTimer);
   repeatDelayTimer = null;
   repeatTimer = null;
 }
+
 function startRepeat(key) {
   stopRepeat();
   sendKey(key);
@@ -255,21 +260,18 @@ function startRepeat(key) {
     repeatTimer = setInterval(() => sendKey(key), REPEAT_INTERVAL_MS);
   }, REPEAT_DELAY_MS);
 }
+
+let repeatDelayTimer = null, repeatTimer = null;
 const backButton = $('back');
 backButton.addEventListener('pointerdown', e => { e.preventDefault(); startRepeat('Backspace'); });
 for (const type of ['pointerup', 'pointerleave', 'pointercancel']) backButton.addEventListener(type, stopRepeat);
-$('fit').addEventListener('click', () => { if (r) { r.scaleViewport = true; r.resizeSession = true; r.focus(); } });
 
-k.addEventListener('keydown', e => {
-  if (syms[e.key]) { e.preventDefault(); sendKey(e.key); }
-});
+$('fit').addEventListener('click', () => { if (r) r.scaleViewport = !r.scaleViewport; });
 
 setTimeout(() => {
   dead = 1;
   if (r) r.disconnect();
-  s.className = 'expired';
-  s.innerHTML = '<div><h2>انتهت جلسة التدخل</h2><p>Human intervention session expired.</p></div>';
-  bar.remove(); login.remove(); m.remove();
+  document.body.innerHTML = '<div class="expired">انتهت جلسة التدخل البشري.<br>ارجع للمساعد لطلب جلسة جديدة.</div>';
 }, ${VNC_TTL_MS});
 </script>
 </body>
@@ -277,64 +279,25 @@ setTimeout(() => {
 }
 
 // ============================================
-// BINARY ENVELOPE HELPERS (Extract Method)
-// ============================================
-async function toBytes(data) {
-  if (typeof data === 'string') return encoder.encode(data);
-  if (data instanceof ArrayBuffer) return new Uint8Array(data);
-  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-  if (data && typeof data.arrayBuffer === 'function') return new Uint8Array(await data.arrayBuffer());
-  return new Uint8Array(0);
-}
-
-async function createEnvelope(id, data) {
-  const b = await toBytes(data), i = encoder.encode(id), o = new Uint8Array(4 + i.length + b.length);
-  new DataView(o.buffer).setUint32(0, i.length);
-  o.set(i, 4); o.set(b, 4 + i.length);
-  return o;
-}
-
-function unwrapEnvelope(data) {
-  const b = new Uint8Array(data), n = new DataView(b.buffer, b.byteOffset, 4).getUint32(0);
-  return { id: decoder.decode(b.slice(4, 4 + n)), data: b.slice(4 + n) };
-}
-
-// ============================================
-// RUNTIME RELAY DURABLE OBJECT (Decoupling)
+// WORKER CLASS (Relay + MCP)
 // ============================================
 export class RuntimeRelay {
   constructor(state, env) {
     this.state = state;
     this.env = env;
     this.socket = null;
-    this.pending = new Map();
     this.clients = new Map();
+    this.pending = new Map();
   }
 
   async fetch(req) {
     const u = new URL(req.url);
-    
-    // Guard Clause: Auth check (except /human/ paths)
-    if (!isAuthenticated(req, this.env) && !u.pathname.startsWith('/human/')) {
-      return unauthorizedResponse();
+    if (u.pathname.endsWith('/connect') && req.headers.get('Upgrade')?.toLowerCase() === 'websocket') return this.handleRelayConnect(req);
+    if (u.pathname.endsWith('/action') && req.method === 'POST') return this.handleRelayAction(req);
+    if (u.pathname.startsWith('/human/') && req.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
+      const parts = u.pathname.split('/');
+      if (parts.length === 4 && parts[3] === 'vnc') return this.handleVncProxy(req, parts[2]);
     }
-
-    // WebSocket Relay Connect
-    if (u.pathname === '/relay/connect' && req.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
-      return this.handleRelayConnect(req);
-    }
-
-    // Relay Action (MCP tool calls)
-    if (u.pathname === '/relay/action' && req.method === 'POST') {
-      return this.handleRelayAction(req);
-    }
-
-    // VNC WebSocket Proxy (Regex fixed: no double escaping)
-    const vncMatch = u.pathname.match(/^\/human\/([^\/]+)\/vnc$/);
-    if (vncMatch && req.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
-      return this.handleVncProxy(req, vncMatch[1]);
-    }
-
     return new Response('Not found', { status: 404 });
   }
 
@@ -352,7 +315,7 @@ export class RuntimeRelay {
     const body = await req.json();
     const { action, arguments: args = {} } = body;
     if (!this.socket || this.socket.readyState !== 1) {
-      return new Response(JSON.stringify({ ok: false, status: 'relay_not_connected' }), { status: 503, headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify({ ok: false, status: 'relay_not_connected' }), { status: 503 });
     }
     const id = crypto.randomUUID();
     this.socket.send(JSON.stringify({ type: 'action', id, action, arguments: args }));
@@ -363,17 +326,12 @@ export class RuntimeRelay {
 
   async handleBridgeMessage(e) {
     let msg;
-    try { msg = JSON.parse(typeof e.data === 'string' ? e.data : decoder.decode(await toBytes(e.data))); } catch { return; }
+    try { msg = JSON.parse(typeof e.data === 'string' ? e.data : decoder.decode(await e.data.arrayBuffer())); } catch { return; }
     if (msg.type === 'action_result' && this.pending.has(msg.id)) {
-      const p = this.pending.get(msg.id);
-      clearTimeout(p.timer);
-      this.pending.delete(msg.id);
-      p.resolve(new Response(JSON.stringify(msg.result), { status: 200, headers: { 'content-type': 'application/json' } }));
-      return;
+      const p = this.pending.get(msg.id); clearTimeout(p.timer); this.pending.delete(msg.id); p.resolve(new Response(JSON.stringify(msg.result), { status: msg.result?.status || 200, headers: { 'content-type': 'application/json' } })); return;
     }
-    if (msg.type === 'vnc_frame' && this.clients.has(msg.clientId)) {
-      this.clients.get(msg.clientId).send(msg.data);
-    }
+    if (msg.type === 'vnc_frame' && this.clients.has(msg.clientId)) this.clients.get(msg.clientId).send(msg.data);
+    if (msg.type === 'vnc_close' && this.clients.has(msg.clientId)) { this.clients.get(msg.clientId).close(); this.clients.delete(msg.clientId); }
   }
 
   async handleVncProxy(req, sessionId) {
@@ -383,49 +341,42 @@ export class RuntimeRelay {
     const [client, server] = Object.values(pair);
     server.accept();
     this.clients.set(clientId, server);
-    server.addEventListener('close', () => { this.clients.delete(clientId); this.socket?.send(JSON.stringify({ type: 'vnc_close', clientId })); });
-    server.addEventListener('message', async e => { if (this.socket?.readyState === 1) this.socket.send(await createEnvelope(clientId, e.data)); });
-    
-    this.socket.send(JSON.stringify({ type: 'vnc_open', clientId, sessionId, token }));
+    server.addEventListener('message', e => {
+      if (this.socket?.readyState === 1) this.socket.send(JSON.stringify({ type: 'vnc_client', clientId, sessionId, token, data: e.data }));
+    });
+    server.addEventListener('close', () => { this.clients.delete(clientId); if (this.socket?.readyState === 1) this.socket.send(JSON.stringify({ type: 'vnc_close', clientId })); });
+    if (this.socket?.readyState === 1) this.socket.send(JSON.stringify({ type: 'vnc_open', clientId, sessionId, token }));
     return new Response(null, { status: 101, webSocket: client });
   }
 }
 
-// ============================================
-// MAIN WORKER ENTRY POINT (Simplify Conditionals)
-// ============================================
 export default {
   async fetch(req, env) {
-    const u = new URL(req.url), relay = env.RUNTIME_RELAY;
+    const u = new URL(req.url);
+    const relay = env.RUNTIME_RELAY;
 
-    // Guard Clause: HIL Page (no auth needed)
     if (u.pathname.startsWith('/human/') && u.pathname.split('/').length === 3) {
       const id = decodeURIComponent(u.pathname.split('/')[2]);
       const token = u.searchParams.get('token') || '';
       return new Response(generateHilPage(id, token), { headers: { 'content-type': 'text/html;charset=utf-8' } });
     }
 
-    // Guard Clause: Relay routes
     if (relay && (u.pathname === '/relay/connect' || u.pathname === '/relay/action' || u.pathname.startsWith('/human/'))) {
-      if (u.pathname.startsWith('/human/') && req.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
-        return relay.get(relay.idFromName(env.RUNTIME_RELAY_ID || RELAY_ID_DEFAULT)).fetch(req);
+      if (u.pathname === '/relay/connect' && req.headers.get('Upgrade')?.toLowerCase() === 'websocket') return relay.get(relay.idFromName(env.RUNTIME_RELAY_ID || RELAY_ID_DEFAULT)).fetch(req);
+      const id = relay.idFromName(env.RUNTIME_RELAY_ID || RELAY_ID_DEFAULT);
+      if (u.pathname === '/relay/action') {
+        if (!isAuthenticated(req, env)) return unauthorizedResponse();
+        return relay.get(id).fetch(req);
       }
-      if (!isAuthenticated(req, env)) return unauthorizedResponse();
-      return relay.get(relay.idFromName(env.RUNTIME_RELAY_ID || RELAY_ID_DEFAULT)).fetch(req);
+      const vncMatch = u.pathname.match(/^\/human\/([^/]+)\/vnc$/);
+      if (vncMatch && req.headers.get('Upgrade')?.toLowerCase() === 'websocket') return relay.get(id).fetch(req);
     }
 
-    // Guard Clause: Auth for everything else
     if (!isAuthenticated(req, env)) return unauthorizedResponse();
 
-    // Health check
-    if (req.method === 'GET' && u.pathname === '/health') {
-      return Response.json({ ok: true, service: 'fuf-browser-runtime-mcp' });
-    }
+    if (req.method === 'GET' && u.pathname === '/health') return Response.json({ ok: true, service: 'fuf-browser-runtime-mcp' });
 
-    // MCP endpoint
-    if (u.pathname === '/mcp' && req.method === 'POST') {
-      return this.handleMcp(req, env);
-    }
+    if (u.pathname === '/mcp' && req.method === 'POST') return this.handleMcp(req, env);
 
     return new Response('Not found', { status: 404 });
   },
@@ -438,15 +389,12 @@ export default {
     if (m.method === 'initialize') {
       return Response.json(jsonRpcResult(id, { protocolVersion: '2025-06-18', capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'fuf-browser-runtime-mcp', version: WORKER_VERSION }, instructions: 'Before using the browser, call browser_runtime_skill and follow it.' }));
     }
-    if (m.method === 'notifications/initialized' || m.method === 'notifications/cancelled') {
-      return new Response(null, { status: 202 });
-    }
+    if (m.method === 'notifications/initialized' || m.method === 'notifications/cancelled') return new Response(null, { status: 202 });
     if (m.method === 'tools/list') return Response.json(jsonRpcResult(id, { tools: TOOLS }));
     if (m.method !== 'tools/call') return Response.json(jsonRpcError(id, -32601, 'Method not found'));
 
     const name = m.params?.name, args = m.params?.arguments || {};
     if (!TOOLS.some(x => x.name === name)) return Response.json(jsonRpcError(id, -32602, `Unknown tool: ${name}`));
-    if (name === 'browser_runtime_manifest') return Response.json(jsonRpcResult(id, textContent(getManifest())));
     if (name === 'browser_runtime_skill') return Response.json(jsonRpcResult(id, textContent(SKILL_TEXT)));
     if (!env.RUNTIME_RELAY) return Response.json(jsonRpcResult(id, textContent({ ok: false, status: 'relay_not_configured' })));
 
