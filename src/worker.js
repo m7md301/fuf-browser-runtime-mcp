@@ -5,7 +5,7 @@
 // ============================================
 const VNC_TTL_MS = 900000; // 15 minutes
 const RELAY_TIMEOUT_MS = 60000;
-const WORKER_VERSION = '0.4.7';
+const WORKER_VERSION = '0.4.8';
 const RELAY_ID_DEFAULT = 'runtime';
 const NOVNC_RFB_URL = 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.4.0/core/rfb.js';
 
@@ -242,6 +242,97 @@ function connect() {
     r.scaleViewport = true;
     r.resizeSession = true;
     r.focusOnClick = true;
+
+    // Mobile tap safety net. noVNC (1.4.0) has no public pointer API, so this wraps
+    // its internal _sendMouse(x, y, mask), which takes element-relative coordinates
+    // and scales them itself. noVNC's own gesture handler stays the primary path;
+    // the net only repairs a short one-finger tap that did not produce a full click.
+    // Everything is guarded: if the internals are missing, the net is simply off.
+    const tapCanvas = s.querySelector('canvas');
+    if (tapCanvas && typeof r._sendMouse === 'function') {
+      const TAP_MAX_MOVE_PX = 10;
+      const TAP_MAX_MS = 700;
+      const TAP_SETTLE_MS = 120;
+      const TAP_MIN_PRESS_MS = 60;
+      const LEFT = 1;
+      const sendMouse = r._sendMouse.bind(r);
+      let lastMask = 0, lastX = 0, lastY = 0, lastDownAt = -1, lastUpAt = -1, pendingUp = null;
+      let tap = null;
+
+      // Records the last button mask. A left click whose release follows its press
+      // by less than TAP_MIN_PRESS_MS gets its release delayed so Chromium sees a
+      // real press. A queued release is always flushed before any later event.
+      r._sendMouse = (x, y, mask) => {
+        const now = performance.now();
+        if (pendingUp) {
+          clearTimeout(pendingUp.timer);
+          const queued = pendingUp;
+          pendingUp = null;
+          sendMouse(queued.x, queued.y, queued.mask);
+        }
+        const wasDown = (lastMask & LEFT) !== 0;
+        const isDown = (mask & LEFT) !== 0;
+        if (isDown && !wasDown) lastDownAt = now;
+        if (!isDown && wasDown) lastUpAt = now;
+        const heldMs = now - lastDownAt;
+        lastMask = mask; lastX = x; lastY = y;
+        if (wasDown && !isDown && heldMs < TAP_MIN_PRESS_MS) {
+          const queued = { x, y, mask, timer: null };
+          queued.timer = setTimeout(() => {
+            if (pendingUp === queued) pendingUp = null;
+            if (!dead) sendMouse(x, y, mask);
+          }, TAP_MIN_PRESS_MS - heldMs);
+          pendingUp = queued;
+          return;
+        }
+        sendMouse(x, y, mask);
+      };
+
+      tapCanvas.addEventListener('touchstart', e => {
+        if (e.touches.length !== 1) { tap = null; return; }
+        const t = e.touches[0];
+        tap = { id: t.identifier, x: t.clientX, y: t.clientY, at: performance.now() };
+      }, { passive: true });
+
+      // A drag is never turned into a click: any movement past the limit cancels the tap.
+      tapCanvas.addEventListener('touchmove', e => {
+        if (!tap) return;
+        if (e.touches.length !== 1) { tap = null; return; }
+        const t = e.touches[0];
+        if (Math.hypot(t.clientX - tap.x, t.clientY - tap.y) > TAP_MAX_MOVE_PX) tap = null;
+      }, { passive: true });
+
+      tapCanvas.addEventListener('touchend', e => {
+        const started = tap;
+        tap = null;
+        if (!started || e.touches.length !== 0 || dead) return;
+        const end = [...e.changedTouches].find(c => c.identifier === started.id);
+        if (!end) return;
+        if (performance.now() - started.at > TAP_MAX_MS) return;
+        if (Math.hypot(end.clientX - started.x, end.clientY - started.y) > TAP_MAX_MOVE_PX) return;
+        const rect = tapCanvas.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        const x = end.clientX - rect.left, y = end.clientY - rect.top;
+
+        // Give noVNC's own gesture handler time to act, then repair only what is missing.
+        setTimeout(() => {
+          if (dead || !r) return;
+          const pressed = lastDownAt >= started.at;
+          const released = pressed && lastUpAt >= lastDownAt;
+          if (released) return;                                  // complete click: do nothing
+          if (pressed) { if ((lastMask & LEFT) && !pendingUp) r._sendMouse(lastX, lastY, 0); return; }  // down only: send up only
+          r._sendMouse(x, y, LEFT);                              // nothing arrived: full click
+          r._sendMouse(x, y, 0);
+        }, TAP_SETTLE_MS);
+      }, { passive: true });
+
+      // On cancel, drop the tap state and release a stuck button.
+      tapCanvas.addEventListener('touchcancel', () => {
+        tap = null;
+        if (!dead && r && (lastMask & LEFT)) r._sendMouse(lastX, lastY, 0);
+      }, { passive: true });
+    }
+
     r.addEventListener('connect', () => { m.textContent = 'متصل · اكتب في الحقل السفلي'; bar.style.display = 'flex'; });
     r.addEventListener('disconnect', () => { if (!dead) { m.textContent = 'انقطع الاتصال'; login.style.display = 'block'; go.disabled = false; } });
     r.addEventListener('credentialsrequired', () => { r.sendCredentials({ password: pass.value }); });
