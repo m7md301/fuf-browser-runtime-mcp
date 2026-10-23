@@ -7,94 +7,28 @@ const VNC_TTL_MS = 900000; // 15 minutes
 const RELAY_TIMEOUT_MS = 60000;
 const WORKER_VERSION = '0.4.7';
 const RELAY_ID_DEFAULT = 'runtime';
-const NOVNC_RFB_URL = 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.4.0/core/rfb.js';
 
 
-// ============================================
-// SKILL TEXT (read-first guide for any agent using this runtime)
-// ============================================
+// Read-first guide exposed through the MCP skill tool.
 const SKILL_TEXT = [
-  '# FUF Browser Runtime: اقرأ هذا قبل استخدام المتصفح',
-  '',
-  'متصفح Chromium دائم يعمل على جهاز المستخدم، تتحكم به أنت. وجلسة تدخل بشري مؤقتة يستخدمها المستخدم فقط للكابتشا وكلمات السر والتحقق بخطوتين. بعد أن ينتهي يكمل المساعد من نفس المتصفح ونفس التبويبات.',
-  '',
-  '## 1. كيف تبدأ',
-  '',
-  'المتصفح قد يكون مطفأً، وهذا طبيعي وليس عطلاً. لا يعمل من نفسه: إذا أُعيد تشغيل الهاتف أو أوقف النظام Termux تتوقف كل الأجزاء. وتشغيله أمر واحد، وأنت من يشغّله، لا تطلب من المستخدم شيئاً.',
-  '',
-  'الحالة الأولى: عندك shell على الجهاز (المسار /root/browser-agent). شغّل هذا الأمر فقط ولا تفحص قبله:',
-  '',
-  '    cd /root/browser-agent && ./fuf up',
-  '',
-  'آمن للتكرار، ويشغّل المتصفح والشاشة والجسر ومراقب الجسر. إن ظهر خلل شغّل ./fuf doctor فيكتب لك سبب كل خلل وأمر إصلاحه. لا تخمّن منافذ أو مسارات بديلة.',
-  '',
-  'علامات أن المتصفح مطفأ: browser_runtime_status يرجع chromium أو cdp بقيمة false، أو ./fuf status يكتب «لا» أمام المتصفح، أو يفشل أي أمر ./fuf browse. الحل دائماً ./fuf up ثم أعد المحاولة.',
-  '',
-  'الحالة الثانية: ليس عندك shell. استدعِ browser_runtime_status. إن كان المتصفح مطفأً فجرّب browser_runtime_enable. وإن رجعت الأدوات relay_not_connected أو 503 فالجسر نفسه مطفأ ولا يمكن تشغيله عن بُعد، فأخبر المستخدم أن يشغّل في Termux هذا الأمر فقط: cd /root/browser-agent && ./fuf up',
-  '',
-  '## 2. التحكم بالمتصفح (من shell)',
-  '',
-  '    ./fuf browse navigate <رابط>      فتح صفحة',
-  '    ./fuf browse snapshot             قراءة النص والعناصر',
-  '    ./fuf browse click <نص>           ضغط عنصر',
-  '    ./fuf browse type <نص>            كتابة في الحقل المحدد',
-  '    ./fuf browse press Enter          ضغط مفتاح',
-  '    ./fuf browse screenshot <اسم>     لقطة شاشة',
-  '    ./fuf browse tabs                 التبويبات المفتوحة (لترى ما فتحه المستخدم)',
-  '',
-  'المتصفح المحلي هو المسار الأساسي. أدوات MCP هذه لإدارة الجلسة وطلب المستخدم، وليست للتحكم بالصفحات.',
-  '',
-  '## 3. متى تطلب تدخل المستخدم',
-  '',
-  'استدعِ browser_request_human فقط عند:',
-  '- كابتشا أو تحدٍّ مرئي يحتاج إنساناً.',
-  '- كلمة سر لا يجب أن تقرأها أو تخزنها.',
-  '- رمز OTP أو تحقق بخطوتين يكتبه المستخدم.',
-  '- موافقة أمنية لا يصح أن تنفذها نيابة عنه.',
-  '',
-  'لا تطلبه لأن الصفحة بطيئة أو لأن عنصراً يحتاج ضغطة عادية. جرّب التحكم المحلي أولاً. ولا تحاول حل الكابتشا أو تجاوزها بنفسك.',
-  '',
-  '## 4. خطوات الجلسة البشرية',
-  '',
-  '1. أوصل المتصفح إلى الصفحة الصحيحة أولاً.',
-  '2. استدعِ browser_request_human مع reason واضح وttlSeconds (الأقصى 900).',
-  '3. اعرض للمستخدم الرابط وكلمة السر فقط. لا تحفظهما في الذاكرة أو الملفات.',
-  '4. انتظر حتى يقول إنه انتهى.',
-  '5. استدعِ browser_human_done فوراً ثم أكمل المهمة من نفس التبويب.',
-  '',
-  'الجلسة تنتهي وحدها بعد 15 دقيقة كحد أقصى. إن انتهت قبل أن يفتح الرابط فأنشئ جلسة جديدة ولا تعيد استخدام القديمة. بعد browser_human_done يبقى Chromium شغالاً.',
-  '',
-  '## 5. أدوات MCP',
-  '',
-  'الأدوات التي بلا معاملات (status وenable وdisable وhuman_done وskill) تحتاج معاملاً اسمه note: مرّر note بقيمة ok. الخادم يتجاهله، لكن بعض العملاء يفشلون بـ Failed to parse arguments إن أُرسلت أداة بلا وسيطات.',
-  '',
-  '- browser_runtime_skill: هذا الدليل.',
-  '- browser_runtime_status: حالة Chromium وXvfb والجسر والاتصال والجلسة البشرية.',
-  '- browser_runtime_enable: تشغيل المتصفح صراحة. لا يعيد أسرار جلسة قديمة.',
-  '- browser_request_human: جلسة بشرية جديدة (رابط وكلمة سر).',
-  '- browser_human_done: إنهاء الجلسة البشرية فقط.',
-  '- browser_runtime_disable: إنهاء الجلسة البشرية المؤقتة.',
-  '- browser_runtime_manifest: وصف مختصر للخدمة.',
-  '',
-  '## 6. قواعد',
-  '',
-  '- لا تغلق Chromium ولا تحذف مجلد profile: فيه جلسات المستخدم.',
-  '- لا تستخدم ./fuf down أثناء مهمة جارية إلا بطلب صريح.',
-  '- لا تكتب MCP_GATEWAY_SECRET ولا كلمات سر الجلسات في الذاكرة.',
-  '- مانع الإعلانات مفعّل. إن كسر موقعاً فعدّل إعداده للموقع بدل إزالته.',
-  '- الصفحة البشرية تدعم العربية والإنجليزية والحذف.'
+  '# FUF Browser Runtime: اقرأ هذا قبل استخدام المتصفح', '',
+  'المتصفح قد يكون مطفأً، وهذا طبيعي وليس عطلاً. إذا أُعيد تشغيل الهاتف أو توقف Termux شغّل: cd /root/browser-agent && ./fuf up',
+  '', 'استدعِ browser_runtime_skill قبل استخدام المتصفح أو طلب تدخل المستخدم.',
+  'اطلب browser_request_human فقط للكابتشا أو كلمات السر أو OTP أو موافقة أمنية.',
+  'بعد انتهاء المستخدم استدعِ browser_human_done فوراً. لا تحفظ كلمات السر أو أسرار الجلسات.',
+  '', 'الأدوات التي بلا معاملات تحتاج note بقيمة ok لبعض العملاء؛ الخادم يتجاهله.'
 ].join('\n');
 
 // ============================================
 // TOOLS DEFINITION (Decoupling)
 // ============================================
 const TOOLS = [
-  { name: 'browser_runtime_skill', description: 'READ THIS FIRST before using the browser or requesting human help. Returns the usage guide: how to start, when to request the user, and the exact steps.', inputSchema: { type: 'object', properties: { note: { type: 'string', description: 'Pass any short text such as ok. Ignored by the server. It exists only so clients always send valid JSON arguments.' } }, required: ['note'] } },
-  { name: 'browser_runtime_enable', description: 'Enable browser runtime explicitly and wait until ready.', inputSchema: { type: 'object', properties: { note: { type: 'string', description: 'Pass any short text such as ok. Ignored by the server. It exists only so clients always send valid JSON arguments.' } }, required: ['note'] } },
-  { name: 'browser_runtime_status', description: 'Return complete runtime and relay status.', inputSchema: { type: 'object', properties: { note: { type: 'string', description: 'Pass any short text such as ok. Ignored by the server. It exists only so clients always send valid JSON arguments.' } }, required: ['note'] } },
-  { name: 'browser_runtime_disable', description: 'Disable runtime and close temporary sessions.', inputSchema: { type: 'object', properties: { note: { type: 'string', description: 'Pass any short text such as ok. Ignored by the server. It exists only so clients always send valid JSON arguments.' } }, required: ['note'] } },
-  { name: 'browser_request_human', description: 'Create a temporary human intervention session (CAPTCHA, passwords, OTP only). Call browser_runtime_skill first if you have not read it.', inputSchema: { type: 'object', properties: { reason: { type: 'string' }, ttlSeconds: { type: 'number' } }, required: ['reason'] } },
-  { name: 'browser_human_done', description: 'Mark current human intervention complete.', inputSchema: { type: 'object', properties: { note: { type: 'string', description: 'Pass any short text such as ok. Ignored by the server. It exists only so clients always send valid JSON arguments.' } }, required: ['note'] } },
+  { name: 'browser_runtime_skill', description: 'READ THIS FIRST before using the browser or requesting human help.', inputSchema: { type: 'object', properties: { note: { type: 'string' } }, required: ['note'] } },
+  { name: 'browser_runtime_enable', description: 'Enable browser runtime explicitly and wait until ready.', inputSchema: { type: 'object', properties: { note: { type: 'string' } }, required: ['note'] } },
+  { name: 'browser_runtime_status', description: 'Return complete runtime and relay status.', inputSchema: { type: 'object', properties: { note: { type: 'string' } }, required: ['note'] } },
+  { name: 'browser_runtime_disable', description: 'Disable runtime and close temporary sessions.', inputSchema: { type: 'object', properties: { note: { type: 'string' } }, required: ['note'] } },
+  { name: 'browser_request_human', description: 'Create a temporary human intervention session (CAPTCHA, passwords, OTP only).', inputSchema: { type: 'object', properties: { reason: { type: 'string' }, ttlSeconds: { type: 'number' } }, required: ['reason'] } },
+  { name: 'browser_human_done', description: 'Mark current human intervention complete.', inputSchema: { type: 'object', properties: { note: { type: 'string' } }, required: ['note'] } },
   { name: 'browser_runtime_manifest', description: 'Return a portable runtime description.', inputSchema: { type: 'object', properties: { format: { type: 'string', enum: ['text', 'json'] } } } }
 ];
 
@@ -242,6 +176,40 @@ function connect() {
     r.scaleViewport = true;
     r.resizeSession = true;
     r.focusOnClick = true;
+    // Mobile tap safety net. noVNC remains the primary touch handler; this only
+    // repairs a missing button release and never emits a second normal click.
+    const display = s;
+    let touch = null, lastPointer = null;
+    const originalSendPointerEvent = r.sendPointerEvent.bind(r);
+    r.sendPointerEvent = (x, y, mask) => {
+      lastPointer = { x, y, mask, at: performance.now() };
+      return originalSendPointerEvent(x, y, mask);
+    };
+    display.addEventListener('touchstart', e => {
+      if (e.touches.length !== 1) { touch = null; return; }
+      const t = e.touches[0];
+      touch = { id: t.identifier, x: t.clientX, y: t.clientY };
+    }, { passive: true });
+    display.addEventListener('touchend', e => {
+      if (!touch || !r || dead) { touch = null; return; }
+      const t = [...e.changedTouches].find(x => x.identifier === touch.id);
+      const start = touch;
+      touch = null;
+      if (!t || Math.hypot(t.clientX - start.x, t.clientY - start.y) > 10) return;
+      const now = performance.now();
+      const canvas = display.querySelector('canvas');
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = Math.round((t.clientX - rect.left) * canvas.width / rect.width);
+      const y = Math.round((t.clientY - rect.top) * canvas.height / rect.height);
+      // A complete noVNC tap needs no repair. If only button-down arrived,
+      // emit only the missing release; otherwise emit the complete click.
+      const recent = lastPointer && now - lastPointer.at < 250;
+      if (recent && lastPointer.mask === 0) return;
+      if (!(recent && (lastPointer.mask & 1))) r.sendPointerEvent(x, y, 1);
+      r.sendPointerEvent(x, y, 0);
+    }, { passive: true });
+    display.addEventListener('touchcancel', () => { touch = null; }, { passive: true });
     r.addEventListener('connect', () => { m.textContent = 'متصل · اكتب في الحقل السفلي'; bar.style.display = 'flex'; });
     r.addEventListener('disconnect', () => { if (!dead) { m.textContent = 'انقطع الاتصال'; login.style.display = 'block'; go.disabled = false; } });
     r.addEventListener('credentialsrequired', () => { r.sendCredentials({ password: pass.value }); });
@@ -277,11 +245,12 @@ $('enter').addEventListener('click', () => sendKey('Enter'));
 // Backspace button: one tap deletes one character; holding repeats.
 const REPEAT_DELAY_MS = 400;
 const REPEAT_INTERVAL_MS = 70;
-let repeatDelayTimer = null, repeatTimer = null;
 
 function stopRepeat() {
   clearTimeout(repeatDelayTimer);
   clearInterval(repeatTimer);
+  repeatDelayTimer = null;
+  repeatTimer = null;
 }
 
 function startRepeat(key) {
@@ -292,23 +261,17 @@ function startRepeat(key) {
   }, REPEAT_DELAY_MS);
 }
 
+let repeatDelayTimer = null, repeatTimer = null;
 const backButton = $('back');
 backButton.addEventListener('pointerdown', e => { e.preventDefault(); startRepeat('Backspace'); });
-for (const type of ['pointerup', 'pointerleave', 'pointercancel']) {
-  backButton.addEventListener(type, stopRepeat);
-}
-$('fit').addEventListener('click', () => { if (r) { r.scaleViewport = true; r.resizeSession = true; r.focus(); } });
+for (const type of ['pointerup', 'pointerleave', 'pointercancel']) backButton.addEventListener(type, stopRepeat);
 
-k.addEventListener('keydown', e => {
-  if (syms[e.key]) { e.preventDefault(); sendKey(e.key); }
-});
+$('fit').addEventListener('click', () => { if (r) r.scaleViewport = !r.scaleViewport; });
 
 setTimeout(() => {
   dead = 1;
   if (r) r.disconnect();
-  s.className = 'expired';
-  s.innerHTML = '<div><h2>انتهت جلسة التدخل</h2><p>Human intervention session expired.</p></div>';
-  bar.remove(); login.remove(); m.remove();
+  document.body.innerHTML = '<div class="expired">انتهت جلسة التدخل البشري.<br>ارجع للمساعد لطلب جلسة جديدة.</div>';
 }, ${VNC_TTL_MS});
 </script>
 </body>
@@ -316,135 +279,81 @@ setTimeout(() => {
 }
 
 // ============================================
-// BINARY ENVELOPE HELPERS (Extract Method)
-// ============================================
-async function toBytes(data) {
-  if (typeof data === 'string') return encoder.encode(data);
-  if (data instanceof ArrayBuffer) return new Uint8Array(data);
-  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-  if (data && typeof data.arrayBuffer === 'function') return new Uint8Array(await data.arrayBuffer());
-  return new Uint8Array(0);
-}
-
-async function createEnvelope(id, data) {
-  const b = await toBytes(data), i = encoder.encode(id), o = new Uint8Array(4 + i.length + b.length);
-  new DataView(o.buffer).setUint32(0, i.length);
-  o.set(i, 4); o.set(b, 4 + i.length);
-  return o;
-}
-
-function unwrapEnvelope(data) {
-  const b = new Uint8Array(data), n = new DataView(b.buffer, b.byteOffset, 4).getUint32(0);
-  return { id: decoder.decode(b.slice(4, 4 + n)), data: b.slice(4 + n) };
-}
-
-// ============================================
-// RUNTIME RELAY DURABLE OBJECT (Decoupling)
+// WORKER CLASS (Relay + MCP)
 // ============================================
 export class RuntimeRelay {
   constructor(state, env) {
     this.state = state;
     this.env = env;
     this.socket = null;
-    this.pending = new Map();
     this.clients = new Map();
+    this.pending = new Map();
   }
 
   async fetch(req) {
     const u = new URL(req.url);
-    
-    if (!isAuthenticated(req, this.env) && !u.pathname.startsWith('/human/')) {
-      return unauthorizedResponse();
+    if (u.pathname.endsWith('/connect') && req.headers.get('Upgrade')?.toLowerCase() === 'websocket') return this.handleRelayConnect(req);
+    if (u.pathname.endsWith('/action') && req.method === 'POST') return this.handleRelayAction(req);
+    if (u.pathname.startsWith('/human/') && req.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
+      const parts = u.pathname.split('/');
+      if (parts.length === 4 && parts[3] === 'vnc') return this.handleVncProxy(req, parts[2]);
     }
-
-    if (u.pathname === '/relay/connect' && req.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
-      return this.handleRelayConnect(req);
-    }
-
-    if (u.pathname === '/relay/action' && req.method === 'POST') {
-      return this.handleRelayAction(req);
-    }
-
-    const vncMatch = u.pathname.match(/^\/human\/([^\/]+)\/vnc$/);
-    if (vncMatch && req.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
-      return this.handleVncProxy(req, vncMatch[1]);
-    }
-
-    return new Response('Not Found', { status: 404 });
+    return new Response('Not found', { status: 404 });
   }
 
-  handleRelayConnect(req) {
-    const p = new WebSocketPair(), client = p[0], server = p[1];
+  async handleRelayConnect(req) {
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
     server.accept();
-    if (this.socket && this.socket.readyState === 1) this.socket.close(4001, 'replaced');
     this.socket = server;
-    
-    server.addEventListener('message', async e => {
-      if (typeof e.data === 'string') {
-        try {
-          const m = JSON.parse(e.data), q = this.pending.get(m.id);
-          if (q) { this.pending.delete(m.id); q(m); }
-        } catch {}
-      } else {
-        try {
-          const x = unwrapEnvelope(await toBytes(e.data)), c = this.clients.get(x.id);
-          if (c && c.readyState === 1) c.send(x.data);
-        } catch {}
-      }
-    });
-    
-    server.addEventListener('close', () => {
-      if (this.socket === server) this.socket = null;
-      for (const p of this.pending.values()) p({ status: 502, body: JSON.stringify({ error: 'connector_disconnected' }) });
-      this.pending.clear();
-    });
-    
+    server.addEventListener('message', e => this.handleBridgeMessage(e));
+    server.addEventListener('close', () => { this.socket = null; });
     return new Response(null, { status: 101, webSocket: client });
   }
 
   async handleRelayAction(req) {
+    const body = await req.json();
+    const { action, arguments: args = {} } = body;
     if (!this.socket || this.socket.readyState !== 1) {
-      return Response.json({ status: 'relay_not_connected' }, { status: 503 });
+      return new Response(JSON.stringify({ ok: false, status: 'relay_not_connected' }), { status: 503 });
     }
-    const p = await req.json(), id = crypto.randomUUID();
-    const ans = new Promise(resolve => {
-      this.pending.set(id, resolve);
-      setTimeout(() => { if (this.pending.delete(id)) resolve({ status: 504, body: JSON.stringify({ error: 'connector_timeout' }) }); }, RELAY_TIMEOUT_MS);
+    const id = crypto.randomUUID();
+    this.socket.send(JSON.stringify({ type: 'action', id, action, arguments: args }));
+    return new Promise(resolve => {
+      this.pending.set(id, { resolve, timer: setTimeout(() => { this.pending.delete(id); resolve(new Response(JSON.stringify({ ok: false, status: 'relay_timeout' }), { status: 504 })); }, RELAY_TIMEOUT_MS) });
     });
-    this.socket.send(JSON.stringify({ type: 'action', id, action: p.action, arguments: p.arguments || {} }));
-    const r = await ans;
-    return new Response(r.body || JSON.stringify(r), { status: r.status || 200, headers: { 'content-type': 'application/json' } });
   }
 
-  handleVncProxy(req, sessionId) {
-    if (!this.socket || this.socket.readyState !== 1) {
-      return new Response('relay_not_connected', { status: 503 });
+  async handleBridgeMessage(e) {
+    let msg;
+    try { msg = JSON.parse(typeof e.data === 'string' ? e.data : decoder.decode(await e.data.arrayBuffer())); } catch { return; }
+    if (msg.type === 'action_result' && this.pending.has(msg.id)) {
+      const p = this.pending.get(msg.id); clearTimeout(p.timer); this.pending.delete(msg.id); p.resolve(new Response(JSON.stringify(msg.result), { status: msg.result?.status || 200, headers: { 'content-type': 'application/json' } })); return;
     }
-    const token = new URL(req.url).searchParams.get('token') || '', id = crypto.randomUUID();
-    const p = new WebSocketPair(), client = p[0], server = p[1];
+    if (msg.type === 'vnc_frame' && this.clients.has(msg.clientId)) this.clients.get(msg.clientId).send(msg.data);
+    if (msg.type === 'vnc_close' && this.clients.has(msg.clientId)) { this.clients.get(msg.clientId).close(); this.clients.delete(msg.clientId); }
+  }
+
+  async handleVncProxy(req, sessionId) {
+    const token = new URL(req.url).searchParams.get('token') || '';
+    const clientId = crypto.randomUUID();
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
     server.accept();
-    this.clients.set(id, server);
-    
-    server.addEventListener('close', () => {
-      this.clients.delete(id);
-      if (this.socket?.readyState === 1) this.socket.send(JSON.stringify({ type: 'vnc_close', clientId: id }));
+    this.clients.set(clientId, server);
+    server.addEventListener('message', e => {
+      if (this.socket?.readyState === 1) this.socket.send(JSON.stringify({ type: 'vnc_client', clientId, sessionId, token, data: e.data }));
     });
-    
-    server.addEventListener('message', async e => {
-      if (this.socket?.readyState === 1) this.socket.send(await createEnvelope(id, e.data));
-    });
-    
-    this.socket.send(JSON.stringify({ type: 'vnc_open', clientId: id, sessionId, token }));
+    server.addEventListener('close', () => { this.clients.delete(clientId); if (this.socket?.readyState === 1) this.socket.send(JSON.stringify({ type: 'vnc_close', clientId })); });
+    if (this.socket?.readyState === 1) this.socket.send(JSON.stringify({ type: 'vnc_open', clientId, sessionId, token }));
     return new Response(null, { status: 101, webSocket: client });
   }
 }
 
-// ============================================
-// MAIN WORKER ENTRY POINT (Simplify Conditionals)
-// ============================================
 export default {
   async fetch(req, env) {
-    const u = new URL(req.url), relay = env.RUNTIME_RELAY;
+    const u = new URL(req.url);
+    const relay = env.RUNTIME_RELAY;
 
     if (u.pathname.startsWith('/human/') && u.pathname.split('/').length === 3) {
       const id = decodeURIComponent(u.pathname.split('/')[2]);
@@ -453,42 +362,43 @@ export default {
     }
 
     if (relay && (u.pathname === '/relay/connect' || u.pathname === '/relay/action' || u.pathname.startsWith('/human/'))) {
-      if (u.pathname.startsWith('/human/') && req.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
-        return relay.get(relay.idFromName(env.RUNTIME_RELAY_ID || RELAY_ID_DEFAULT)).fetch(req);
+      if (u.pathname === '/relay/connect' && req.headers.get('Upgrade')?.toLowerCase() === 'websocket') return relay.get(relay.idFromName(env.RUNTIME_RELAY_ID || RELAY_ID_DEFAULT)).fetch(req);
+      const id = relay.idFromName(env.RUNTIME_RELAY_ID || RELAY_ID_DEFAULT);
+      if (u.pathname === '/relay/action') {
+        if (!isAuthenticated(req, env)) return unauthorizedResponse();
+        return relay.get(id).fetch(req);
       }
-      if (!isAuthenticated(req, env)) return unauthorizedResponse();
-      return relay.get(relay.idFromName(env.RUNTIME_RELAY_ID || RELAY_ID_DEFAULT)).fetch(req);
+      const vncMatch = u.pathname.match(/^\/human\/([^/]+)\/vnc$/);
+      if (vncMatch && req.headers.get('Upgrade')?.toLowerCase() === 'websocket') return relay.get(id).fetch(req);
     }
 
     if (!isAuthenticated(req, env)) return unauthorizedResponse();
 
-    if (req.method === 'GET' && u.pathname === '/health') {
-      return Response.json({ ok: true, service: 'fuf-browser-runtime-mcp' });
-    }
+    if (req.method === 'GET' && u.pathname === '/health') return Response.json({ ok: true, service: 'fuf-browser-runtime-mcp' });
 
-    if (u.pathname !== '/mcp') return new Response('Not Found', { status: 404 });
-    if (req.method === 'GET') return Response.json(getManifest());
+    if (u.pathname === '/mcp' && req.method === 'POST') return this.handleMcp(req, env);
 
+    return new Response('Not found', { status: 404 });
+  },
+
+  async handleMcp(req, env) {
     let m;
-    try { m = await req.json(); } catch { return Response.json(jsonRpcError(null, -32700, 'Invalid JSON'), { status: 400 }); }
+    try { m = await req.json(); } catch { return Response.json(jsonRpcError(null, -32700, 'Parse error')); }
     const id = m.id ?? null;
 
     if (m.method === 'initialize') {
       return Response.json(jsonRpcResult(id, { protocolVersion: '2025-06-18', capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'fuf-browser-runtime-mcp', version: WORKER_VERSION }, instructions: 'Before using the browser, call browser_runtime_skill and follow it.' }));
     }
-    if (m.method === 'notifications/initialized' || m.method === 'notifications/cancelled') {
-      return new Response(null, { status: 202 });
-    }
-    if (m.method === 'ping') return Response.json(jsonRpcResult(id, {}));
+    if (m.method === 'notifications/initialized' || m.method === 'notifications/cancelled') return new Response(null, { status: 202 });
     if (m.method === 'tools/list') return Response.json(jsonRpcResult(id, { tools: TOOLS }));
     if (m.method !== 'tools/call') return Response.json(jsonRpcError(id, -32601, 'Method not found'));
 
     const name = m.params?.name, args = m.params?.arguments || {};
     if (!TOOLS.some(x => x.name === name)) return Response.json(jsonRpcError(id, -32602, `Unknown tool: ${name}`));
-    if (name === 'browser_runtime_manifest') return Response.json(jsonRpcResult(id, textContent(getManifest())));
     if (name === 'browser_runtime_skill') return Response.json(jsonRpcResult(id, textContent(SKILL_TEXT)));
-    if (!relay) return Response.json(jsonRpcResult(id, textContent({ ok: false, status: 'relay_not_configured' })));
+    if (!env.RUNTIME_RELAY) return Response.json(jsonRpcResult(id, textContent({ ok: false, status: 'relay_not_configured' })));
 
+    const relay = env.RUNTIME_RELAY;
     const r = await relay.get(relay.idFromName(env.RUNTIME_RELAY_ID || RELAY_ID_DEFAULT)).fetch('https://relay.internal/relay/action', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'authorization': `Bearer ${env.MCP_GATEWAY_SECRET}` },
